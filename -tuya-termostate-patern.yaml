@@ -1,0 +1,91 @@
+substitutions:
+  devicename: tuya-termostate 
+  upper_devicename: Tuya Termostate
+  location: Термостат MOES в ванной
+  
+external_components:
+  - source:
+      type: local
+      path: my_components     
+    components: [ tuya_termo ]
+    refresh: 0s
+
+esphome:
+  name: $devicename
+  platform: ESP8266
+  #board: esp12e
+  board: esp_wroom_02
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pass
+  manual_ip:
+    static_ip: !secret ip_tuya_termostate
+    gateway: !secret gateway 
+    subnet: !secret subnet
+    dns1: !secret dns1
+    dns2: !secret dns2
+  ap:
+    ssid:  ${upper_devicename} Hotspot
+    password: !secret ap_wifi_pass
+
+logger:
+    level: DEBUG
+    #level: VERBOSE
+    baud_rate: 0
+    
+api:
+
+ota:
+  password: !secret ota_pass
+
+captive_portal:
+    
+web_server:
+  port: 80
+  auth:
+    username: !secret web_user
+    password: !secret web_pass
+
+#последовательный порт
+uart:
+  id: uart_bus
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+time:
+  - platform: sntp
+    id: sync_time
+
+climate:
+  - platform: tuya_termo
+    name: ${upper_devicename}
+    uart_id: uart_bus
+    time_id: sync_time
+    visual:
+      min_temperature: 5
+      max_temperature: 35
+      temperature_step: 0.5
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature:
+      name: ${upper_devicename} Internal Temperature
+    external_temperature:
+      name: ${upper_devicename} External Temperature
+    children_lock:
+      name: ${upper_devicename} Child Lock
+    shedule_selector:
+      name: ${upper_devicename} Plan Day Selector
+    shedule_hours:
+      name: ${upper_devicename} Plan Hours
+    shedule_minutes:
+      name: ${upper_devicename} Plan Minutes
+    shedule_temperature:
+      name: ${upper_devicename} Plan Temperatures
+    product_id:   
+      name: ${upper_devicename} Product Identifier
