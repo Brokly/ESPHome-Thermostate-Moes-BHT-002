@@ -298,17 +298,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     uint32_t timer_plan_change=0; //флаг-таймер изменения плана работы из espHome
     uint8_t current_select_pos=0xFF; // текущий выбор в селекте
     bool plan_staff=false; // флаг поднимается во время переключения в селекте, для блокировки изменения данных
-
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
        return float(raw)/2;
     }
 
-    /** вывод отладочной информации в лог
-     * dbgLevel - уровень сообщения, определен в ESPHome. За счет его использования можно из ESPHome управлять полнотой сведений в логе.
-     * msg - сообщение, выводимое в лог
-     * line - строка, на которой произошел вызов (удобно при отладке)
-     */
     void _debugMsg(const String &msg, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0, ...) {
         if (dbgLevel < ESPHOME_LOG_LEVEL_NONE) dbgLevel = ESPHOME_LOG_LEVEL_NONE;
         if (dbgLevel > ESPHOME_LOG_LEVEL_VERY_VERBOSE) dbgLevel = ESPHOME_LOG_LEVEL_VERY_VERBOSE;
@@ -321,14 +315,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         va_end(vl);
     }
 
-    /** выводим данные пакета в лог для отладки
-     * dbgLevel - уровень сообщения, определен в ESPHome. За счет его использования можно из ESPHome управлять полнотой сведений в логе.
-     * packet - указатель на пакет для вывода;
-     *          если указатель на crc равен nullptr или первый байт в буфере не AC_PACKET_START_BYTE, то считаем, что передан битый пакет
-     *          или не пакет вовсе. Для такого выводим только массив байт.
-     *          Для нормального пакета данные выводятся с форматированием.
-     * line - строка, на которой произошел вызов (удобно при отладке)
-     **/
     void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0) {
         String st = "";
         char textBuf[11];
@@ -351,18 +337,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         // при этом весь вывод будет в десятичном виде, данные будут разделены ";"
         // и не будет выделения заголовков и CRC квадратными скобками
         dbgLevel = ESPHOME_LOG_LEVEL_ERROR;
-        if (length > HOLMS) {
-            for (int i = 0; i < length; i++) {
-                sprintf(textBuf, "%03d;", packet[i]);
-                st += textBuf;
+        for (size_t i = 0; i < length; i++) {
+            memset(textBuf, 0, 11);
+            sprintf(textBuf, "%02X", packet[i]);
+            st += textBuf;
+            if(i<length-1){
+                st += ";";
             }
-
-            if (line == 0) line = __LINE__;
-            _debugMsg(st, dbgLevel, line);
         }
 #else
         // если дефайна HOLMS нет, то выводим пакеты в HEX и все подряд
-        for (int i = 0; i < length; i++) {
+        for (size_t i = 0; i < length; i++) {
             // для нормальных пакетов надо заключить заголовок в []
             if (i == 0) st += "[";
             // для нормальных пакетов надо заключить CRC в []
@@ -379,10 +364,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
             st += " ";
         }
-
+#endif
         if (line == 0) line = __LINE__;
         _debugMsg(st, dbgLevel, line);
-#endif
     }
 
     // публикация текущего режима работы климата
@@ -463,13 +447,13 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 //отправка статусных запросов
     void inline sendComm(tCommand comm){
-       ESP_LOGD(TAG,"Send command: %u", comm);
+       ESP_LOGD(TAG,"Send short command: %u", comm);
        sendCommand((uint8_t)comm);  
     }
 
 //отправка  статусных команд
     void sendComm(tMode type, tStat state){
-       ESP_LOGD(TAG,"Send status command: %u - %u", type, state);
+       ESP_LOGD(TAG,"Send status command: 0x%04X - %u", type, state);
        uint8_t setComm[]={(uint8_t)(((uint16_t)type)/0x100), (uint8_t)type, 0x00, 0x01, (uint8_t)state};  
        sendCommand(0x06, sizeof(setComm), setComm);   
     }
@@ -728,10 +712,24 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     // вызывается для публикации нового состояния кондиционера
     void stateChanged() {
         bool need_publish=false; // флаг необходимости публикации
+        // режим работы
+        auto old_temp_mode=this->mode;
+        if(_on==(uint8_t)OFF){ //выключено
+           this->mode = climate::CLIMATE_MODE_OFF;
+        } else if(_on==(uint8_t)ON) { //включен
+           if(manualMode==(uint8_t)ON) { 
+              this->mode = climate::CLIMATE_MODE_HEAT;
+           } else if(manualMode==(uint8_t)OFF) {
+              this->mode = climate::CLIMATE_MODE_AUTO;    
+           }
+        }
+        if(old_temp_mode!=this->mode){
+           need_publish=true;
+        }
         //целевая температурв
         uint8_t temp_dest;
         auto now = time_->now(); // текущее время
-        if(manualMode==(uint8_t)OFF && now.is_valid()){ // режим работы по расписанию и есть правильное текущее время
+        if((manualMode==(uint8_t)OFF || this->mode==climate::CLIMATE_MODE_AUTO) && now.is_valid()){ // режим работы по расписанию и есть правильное текущее время
            now.recalc_timestamp_utc(true);  // получить локальное время
            const uint8_t day_core[]={0,7,1,2,3,4,5,6}; // счет 1..7, у нас воскр-7, у них воскр-1
            temp_dest=plan.get_plan_current_temp_raw(day_core[now.day_of_week], now.hour, now.minute);
@@ -756,20 +754,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            this->current_temperature = temp;
            need_publish=true;
         }
-        // режим работы
-        auto old_temp_mode=this->mode;
-        if(_on==(uint8_t)OFF){ //выключено
-           this->mode = climate::CLIMATE_MODE_OFF;
-        } else if(_on==(uint8_t)ON) { //включен
-           if(manualMode==(uint8_t)ON) { 
-              this->mode = climate::CLIMATE_MODE_HEAT;
-           } else if(manualMode==(uint8_t)OFF) {
-              this->mode = climate::CLIMATE_MODE_AUTO;    
-           }
-        }
-        if(old_temp_mode!=this->mode){
-           need_publish=true;
-        }
         // пресет
         auto old_temp_preset=this->preset;
         if(ecoMode==(uint8_t)ON) { 
@@ -786,21 +770,87 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         if(this->mode == climate::CLIMATE_MODE_OFF){
            this->action= climate::CLIMATE_ACTION_OFF;  
         } else {
-           if(old_temp_action!=climate::CLIMATE_ACTION_IDLE){ // было в нагреве
+           if(old_temp_action==climate::CLIMATE_ACTION_HEATING){ // было в нагреве
               if(this->current_temperature >= this->target_temperature ||
                  temp >= temperature_overheat){ // температура превысила целевую или перегрелся внешний датчик
                  this->action = climate::CLIMATE_ACTION_IDLE; // значит прекратить нагрев
               }
-           } else if(old_temp_action!=climate::CLIMATE_ACTION_HEATING){
+           } else if(old_temp_action==climate::CLIMATE_ACTION_IDLE ){
               if(this->current_temperature <= this->target_temperature-temperature_deadzone &&
                  temp <= temperature_overheat-1.0 ){ // температура ниже целевой на гистерезис
                  this->action = climate::CLIMATE_ACTION_HEATING; // нагрев включается
               }
-           }
+           } else if(old_temp_action==climate::CLIMATE_ACTION_OFF){
+              if(this->current_temperature <= this->target_temperature-temperature_deadzone &&
+                 temp <= temperature_overheat-1.0 ){ // температура ниже целевой на гистерезис
+                 this->action = climate::CLIMATE_ACTION_HEATING; // нагрев включается
+              } else {
+                 this->action = climate::CLIMATE_ACTION_IDLE;
+              }
+           }               
         }
         if(old_temp_action!=this->action || need_publish){ // бликуем при необходимости
            ESP_LOGD(TAG,"State changed, let's publish it.");
-           this->publish_state();   
+           this->publish_state();
+        }
+    }
+
+    // вызывается пользователем из интерфейса ESPHome или Home Assistant
+    void control(const esphome::climate::ClimateCall &call) override {
+        ESP_LOGD(TAG,"State changed from user.");
+        bool need_pub=false;
+        // Проверка режима
+        auto _mode=this->mode;
+        if (call.get_mode().has_value()) {
+            ClimateMode mode = *call.get_mode();
+            switch (mode) {
+                case climate::CLIMATE_MODE_OFF:
+                    if(_on!=OFF) send_on=OFF;
+                    this->mode = mode;
+                    break;
+                case climate::CLIMATE_MODE_HEAT:
+                    if(_on!=ON) send_on=ON;
+                    if(manualMode!=ON) send_manual=ON;
+                    this->mode = mode;
+                    break;
+                case climate::CLIMATE_MODE_AUTO:
+                    if(_on!=ON) send_on=ON;
+                    if(manualMode!=OFF) send_manual=OFF;
+                    this->mode = mode;
+                    break;
+                default:
+                    break;
+            }
+        }
+        // Проверка пресета
+        auto _presset=this->preset;
+        if (call.get_preset().has_value()) {
+            ClimatePreset preset = *call.get_preset();
+            switch (preset) {
+                case climate::CLIMATE_PRESET_ECO:
+                    if(ecoMode!=ON) send_eco=ON;
+                    this->preset = preset;
+                    break;
+                case climate::CLIMATE_PRESET_NONE:
+                    if(ecoMode!=OFF) send_eco=OFF;
+                    this->preset = preset;
+                    break;
+                default:
+                    break;
+            }
+        } 
+        // Проверка целевой температуры
+        auto t_temp=this->target_temperature;
+        if (call.get_target_temperature().has_value()) {
+            this->target_temperature=*call.get_target_temperature();
+            if((_on==ON && manualMode==ON) || this->mode == climate::CLIMATE_MODE_HEAT) { // целевую температуру меняем только в режиме нагрева
+               new_target_temp_raw= (uint8_t)(this->target_temperature*2); // новая целевая температура, для отправки термостату
+            } else {
+               this->publish_state();
+            }
+        }
+        if(t_temp!=this->target_temperature || _presset!=this->preset || _mode!=this->mode){
+           stateChanged();
         }
     }
 
@@ -942,70 +992,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         ESP_LOGCONFIG(TAG, "      - Eco: %.2f", temperature_eco);
         ESP_LOGCONFIG(TAG, "      - Overheat: %.2f", temperature_overheat);
         ESP_LOGCONFIG(TAG, "      - Deadzone: %.2f", temperature_deadzone);
-    }
-
-    // вызывается пользователем из интерфейса ESPHome или Home Assistant
-    void control(const esphome::climate::ClimateCall &call) override {
-        ESP_LOGD(TAG,"State changed from user.");
-        // Проверка режима
-        if (call.get_mode().has_value()) {
-            ClimateMode mode = *call.get_mode();
-            switch (mode) {
-                case climate::CLIMATE_MODE_OFF:
-                    if(_on!=OFF) send_on=OFF;
-                    this->mode = mode;
-                    break;
-                case climate::CLIMATE_MODE_HEAT:
-                    if(_on!=ON) send_on=ON;
-                    if(manualMode!=ON) send_manual=ON;
-                    this->mode = mode;
-                    break;
-                case climate::CLIMATE_MODE_AUTO:
-                    if(_on!=ON) send_on=ON;
-                    if(manualMode!=OFF) send_manual=OFF;
-                    this->mode = mode;
-                    break;
-                default:
-                    break;
-            }
-        }
-        // Проверка пресета
-        if (call.get_preset().has_value()) {
-            ClimatePreset preset = *call.get_preset();
-            switch (preset) {
-                case climate::CLIMATE_PRESET_ECO:
-                    if(ecoMode!=ON) send_eco=ON;
-                    this->preset = preset;
-                    break;
-                case climate::CLIMATE_PRESET_NONE:
-                    if(ecoMode!=OFF) send_eco=OFF;
-                    this->preset = preset;
-                    break;
-                default:
-                    break;
-            }
-        } 
-        // Проверка целевой температуры
-        if (call.get_target_temperature().has_value()) {
-            if(_on==ON && manualMode==ON){ // целевую температуру меняем только в режиме нагрева
-               new_target_temp_raw= (uint8_t)(*call.get_target_temperature()*2); // новая целевая температура
-            } 
-        }
-        // Пользователь выбрал пресет
-        if (call.get_preset().has_value()) {
-            ClimatePreset preset = *call.get_preset();
-            switch (preset) {
-                case climate::CLIMATE_PRESET_ECO:
-                    this->preset = preset;
-                    break;
-                case climate::CLIMATE_PRESET_NONE:
-                    this->preset = preset;
-                    break;
-                default:
-                    break;
-            }
-        } 
-
     }
 
     // как оказалось сюда обращаются каждый раз для получения любого параметра
