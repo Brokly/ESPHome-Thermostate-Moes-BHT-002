@@ -1,0 +1,192 @@
+substitutions:
+  devicename: tuya-termostate 
+  upper_devicename: Tuya Termostate
+  location: Термостат MOES в ванной
+  
+external_components:
+  - source:
+      type: local
+      path: my_components     
+    components: [ tuya_termo ]
+    refresh: 0s
+
+esphome:
+  name: $devicename
+  platform: ESP8266
+  #board: esp12e
+  board: esp_wroom_02
+  on_boot:
+    priority: 600
+    then:
+       - script.execute: script_show_text
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pass
+  manual_ip:
+    static_ip: !secret ip_tuya_termostate
+    gateway: !secret gateway 
+    subnet: !secret subnet
+    dns1: !secret dns1
+    dns2: !secret dns2
+  ap:
+    ssid:  ${upper_devicename} Hotspot
+    password: !secret ap_wifi_pass
+
+logger:
+    level: DEBUG
+    #level: VERBOSE
+    baud_rate: 0
+    
+api:
+
+ota:
+  password: !secret ota_pass
+
+captive_portal:
+    
+web_server:
+  port: 80
+  auth:
+    username: !secret web_user
+    password: !secret web_pass
+
+#последовательный порт
+uart:
+  id: uart_bus
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+time:
+#для синхронизации времени
+  - platform: sntp
+    id: sync_time
+
+binary_sensor:
+#статус подключения устройства
+  - platform: status
+    name: ${upper_devicename} HA Connected
+
+switch:
+#свитч рестарта устройства
+  - platform: restart
+    name: ${upper_devicename} Restart SW
+    id: restart_sw_id
+#виртуальная кнопка, для скрытия длинного текста
+  - platform: template
+    name: $upper_devicename Hide Notes
+    optimistic: true
+    id: hide_notes
+    entity_category: config
+    icon: 'mdi:eye-off'
+    turn_on_action:
+      - script.execute: script_hide_text
+    turn_off_action:
+      - script.execute: script_show_text
+
+sensor:
+#датчик отображающий уровень сигнала Wifi
+  - platform: wifi_signal
+    name: $upper_devicename Signal
+    update_interval: 60s
+#время работы устройства после загрузки
+  - platform: uptime
+    name: ${upper_devicename} Uptime Sensor
+
+text_sensor:
+#версия прошивки
+  - platform: version
+    name: $upper_devicename ESPHome Version
+#текстовая форма uptime    
+  - platform: template
+    name: ${upper_devicename} Uptime
+    entity_category: diagnostic
+    icon: 'mdi:timer'
+    lambda: |-
+      uint32_t dur=millis()/1000;
+      char buffer[19];
+      if(dur>=86400) sprintf(buffer,"%ud %uh %02um %02us", dur/86400, dur%86400/3600, dur%3600/60, dur%60);
+      else if(dur>=3600) sprintf(buffer,"%uh %02um %02us", dur/3600, dur%3600/60, dur%60);
+      else sprintf(buffer,"%um %02us", dur/60, dur%60);
+      return {buffer};
+#локализация устройства, скрывается на 10 минут при настройке времени работы девайса, так удобно для инета
+  - platform: template
+    name: ${upper_devicename} Location
+    entity_category: diagnostic
+    id: location
+    icon: 'mdi:map-marker-radius'
+#железо устройства (на основе чего сделано), скрывается кнопкой
+  - platform: template
+    name: ${upper_devicename} Hardware
+    entity_category: diagnostic
+    id: hardware
+    icon: 'mdi:saw-blade'
+#точка подключения Wifi
+  - platform: wifi_info
+    ssid:
+      name: ${upper_devicename} Connected SSID
+    bssid:
+      name: ${upper_devicename} Connected BSSID 
+#свободная память      
+  - platform: template
+    name: ${upper_devicename} Free Mem Size
+    entity_category: diagnostic
+    lambda: |-
+      #ifdef ESP32
+         size_t freeValue = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+      #else
+         size_t freeValue = ESP.getFreeHeap();
+      #endif
+      char buffer[10];
+      if(freeValue>=1024) sprintf(buffer,"%uKb", freeValue/1024);
+      else sprintf(buffer,"%ub", freeValue);
+      return {buffer};
+      
+script:
+# процедура публикации большых текстовых кусков, сворачиваем для работы в веб морде
+  - id: script_show_text
+    then:
+     -  lambda: |-
+          id(location).publish_state("${location}");
+          id(hardware).publish_state("Термостат MOES BH-002 (Tywe3s)");
+# процедура публикации большых текстовых кусков, сворачиваем для работы в веб морде
+  - id: script_hide_text
+    then:
+     -  lambda: |-
+          char buffer[]="Turn 'Hide Notes'";
+          id(location).publish_state(buffer);
+          id(hardware).publish_state(buffer);
+
+climate:
+# кастом МОЕS термостат
+  - platform: tuya_termo
+    name: ${upper_devicename}
+    uart_id: uart_bus
+    time_id: sync_time
+    visual:
+      min_temperature: 5
+      max_temperature: 35
+      temperature_step: 0.5
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature:
+      name: ${upper_devicename} Internal Temperature
+    external_temperature:
+      name: ${upper_devicename} External Temperature
+    children_lock:
+      name: ${upper_devicename} Child Lock
+    shedule_selector:
+      name: ${upper_devicename} Plan Day Selector
+    shedule_hours:
+      name: ${upper_devicename} Plan Hours
+    shedule_minutes:
+      name: ${upper_devicename} Plan Minutes
+    shedule_temperature:
+      name: ${upper_devicename} Plan Temperatures
+    product_id:   
+      name: ${upper_devicename} Product Identifier
