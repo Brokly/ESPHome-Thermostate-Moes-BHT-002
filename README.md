@@ -1,7 +1,7 @@
 # ESPHome-Thermostate-Moes-BHT-002
 
 
-Большое распространение у любителей домашней автоматизации получили WIFI dthcbb термостатов Moes-BHT-002.
+Большое распространение у любителей домашней автоматизации получили WIFI термостаты Moes-BHT-002.
 
 ![1](https://user-images.githubusercontent.com/11642286/208393574-359c222d-f9fa-4e75-8af6-3d01674839ef.jpg)
 
