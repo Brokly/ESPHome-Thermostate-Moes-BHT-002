@@ -69,18 +69,18 @@ climate:
       overheat_temperature: 45
       deadzone_temperature: 1
     internal_temperature:
-      name: ${upper_devicename} Internal Temperature
+      name: Internal Temperature
     external_temperature:
-      name: ${upper_devicename} External Temperature
+      name: External Temperature
     children_lock:
-      name: ${upper_devicename} Child Lock
+      name: Child Lock
     shedule_selector:
-      name: ${upper_devicename} Plan Day Selector
+      name: Plan Period Selector
     shedule_hours:
-      name: ${upper_devicename} Plan Hours
+      name: Plan Hours
     shedule_minutes:
-      name: ${upper_devicename} Plan Minutes
+      name: Plan Minutes
     shedule_temperature:
-      name: ${upper_devicename} Plan Temperatures
+      name: Plan Temperatures
     product_id:   
-      name: ${upper_devicename} Product Identifier
+      name: Product Identifier
