@@ -84,7 +84,7 @@ enum tWifiState:uint8_t {wsOFF=1,   //- устройство не имеет н�
 
 class TuyaTermo;
 
-//////////////////////////////////  структуры данных для рпботы с термостатом ///////////////////////////
+//////////////////////////////////  структуры данных для работы с термостатом ///////////////////////////
 
 // структура одной записи периода режима АВТО
 struct termoSet{
@@ -777,12 +777,12 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
               }
            } else if(old_temp_action==climate::CLIMATE_ACTION_IDLE ){
               if(this->current_temperature <= this->target_temperature-temperature_deadzone &&
-                 temp <= temperature_overheat-1.0 ){ // температура ниже целевой на гистерезис
+                 temp < temperature_overheat ){ // температура ниже целевой на гистерезис
                  this->action = climate::CLIMATE_ACTION_HEATING; // нагрев включается
               }
            } else if(old_temp_action==climate::CLIMATE_ACTION_OFF){
               if(this->current_temperature <= this->target_temperature-temperature_deadzone &&
-                 temp <= temperature_overheat-1.0 ){ // температура ниже целевой на гистерезис
+                 temp < temperature_overheat){ // температура ниже целевой на гистерезис
                  this->action = climate::CLIMATE_ACTION_HEATING; // нагрев включается
               } else {
                  this->action = climate::CLIMATE_ACTION_IDLE;
@@ -790,6 +790,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }               
         }
         if(old_temp_action!=this->action || need_publish){ // бликуем при необходимости
+           ESP_LOGE(TAG,"State changed, %f, %f",this->current_temperature, temp);
            ESP_LOGD(TAG,"State changed, let's publish it.");
            this->publish_state();
         }
@@ -926,7 +927,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        termo_number=number_;
        termo_number->traits.set_min_value(_traits.get_visual_min_temperature());
        termo_number->traits.set_max_value(_traits.get_visual_max_temperature());
-       termo_number->traits.set_step(_traits.get_visual_temperature_step());
+       //termo_number->traits.set_step(_traits.get_visual_temperature_step());
+       termo_number->traits.set_step(_traits.get_visual_target_temperature_step());
        number_->add_on_state_callback([this](float new_value){ 
           if(plan_staff==false){ //только если данные изменились не в момент переключения селекта
              plan.d[current_select_pos].temp(new_value);

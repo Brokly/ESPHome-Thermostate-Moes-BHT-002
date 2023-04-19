@@ -99,9 +99,9 @@ CONFIG_SCHEMA = cv.All(
               {
                 cv.Optional(CONF_MIN_TEMPERATURE, default=5.0): cv.temperature,
                 cv.Optional(CONF_MAX_TEMPERATURE, default=35.0): cv.temperature,
-                cv.Optional(CONF_TEMPERATURE_STEP): cv.float_with_unit(
-                    "visual_temperature", "(°C|° C|°|C|° K|° K|K|°F|° F|F)?"
-                ),
+                #cv.Optional(CONF_TEMPERATURE_STEP): cv.float_with_unit(
+                #    "visual_temperature", "(°C|° C|°|C|° K|° K|K|°F|° F|F)?"
+                #),
                 cv.Optional(CONF_ECO_TEMPERATURE, default=20.0): cv.temperature,
                 cv.Optional(CONF_OVERHEAT_TEMPERATURE, default=45.0): cv.temperature,
                 cv.Optional(CONF_DEADZONE_TEMPERATURE, default=1.0): cv.float_range(
@@ -222,8 +222,8 @@ async def to_code(config):
         cg.add(var.set_visual_min_temperature_override(visual[CONF_MIN_TEMPERATURE]))
     if CONF_MAX_TEMPERATURE in visual:
         cg.add(var.set_visual_max_temperature_override(visual[CONF_MAX_TEMPERATURE]))
-    if CONF_TEMPERATURE_STEP in visual:
-        cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_STEP]))
+    #if CONF_TEMPERATURE_STEP in visual:
+    #    cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_STEP]))
     if CONF_ECO_TEMPERATURE in visual:
         cg.add(var.set_visual_temperature_eco(visual[CONF_ECO_TEMPERATURE]))
     if CONF_OVERHEAT_TEMPERATURE in visual:
@@ -262,7 +262,8 @@ async def to_code(config):
         cg.add(var.set_minutes_number(numb))
 
         conf = config[CONF_SHEDULE_TEMPERATURE]
-        numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_STEP])
+        #numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_STEP])
+        numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=0.5)
         cg.add(var.set_temperatures_number(numb))
 
         conf = config[CONF_SHEDULE_SELECTOR]
