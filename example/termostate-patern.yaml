@@ -64,7 +64,7 @@ climate:
     visual:
       min_temperature: 5
       max_temperature: 35
-      temperature_step: 0.5
+      #temperature_step: 0.5 - требуются правки
       eco_temperature: 20
       overheat_temperature: 45
       deadzone_temperature: 1
