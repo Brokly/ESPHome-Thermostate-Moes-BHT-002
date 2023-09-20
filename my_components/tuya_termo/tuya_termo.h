@@ -26,6 +26,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
+
 // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 //#define HOLMS 19
 
@@ -321,7 +322,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
         // заполняем время получения пакета
         memset(textBuf, 0, 11);
-        sprintf(textBuf, "%010u", millis());
+        sprintf(textBuf, "%010u", esphome::millis());
         st = st + textBuf + ": ";
 
         // формируем преамбулы
@@ -433,13 +434,13 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           _tuya_serial->write_array(&chkSum,1); // отправляем КС
           controll_buffer[length+6]=chkSum;
           //_debugPrintPacket(controll_buffer, length+6+1);          
-          lastSend=millis(); //время отправки последнего байта
+          lastSend=esphome::millis(); //время отправки последнего байта
           sendRight=false; // обязательно дождаться таймаута
           waitReply=comm; // запоминаем команду которую отправили
        } else {
           uint32_t timer=-10000;
-          if(millis()-timer>10000){
-             timer=millis();
+          if(esphome::millis()-timer>10000){
+             timer=esphome::millis();
              ESP_LOGE(TAG,"There is no UART port, work is impossible");
           }
        }
@@ -680,7 +681,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
       if((int16_t)(sizeof(receivedCommand))>receiveIndex){ // контроль переполнения буфера входных данных
          receiveIndex++;
       }
-      lastRead=millis();//время чтения последнего байта
+      lastRead=esphome::millis();//время чтения последнего байта
       receivedCommand[receiveIndex] = inChar;
       if(receiveIndex==0 && COMMAND_START[0] != inChar){ //проверка хидера 55
          resetAll(); //  не совпало - ресетимся
@@ -906,7 +907,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        number_->add_on_state_callback([this](float new_value){ 
           if(plan_staff==false){ //только если данные изменились не в момент переключения селекта
              plan.d[current_select_pos].hours=(uint8_t)new_value;
-             timer_plan_change=millis(); // таймер изменения данных
+             timer_plan_change=esphome::millis(); // таймер изменения данных
           }
        });
     }
@@ -917,7 +918,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        number_->add_on_state_callback([this](float new_value){ 
           if(plan_staff==false){ //только если данные изменились не в момент переключения селекта
              plan.d[current_select_pos].minutes=(uint8_t)new_value;
-             timer_plan_change=millis(); // таймер изменения данных
+             timer_plan_change=esphome::millis(); // таймер изменения данных
           }
        });
     }
@@ -932,7 +933,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        number_->add_on_state_callback([this](float new_value){ 
           if(plan_staff==false){ //только если данные изменились не в момент переключения селекта
              plan.d[current_select_pos].temp(new_value);
-             timer_plan_change=millis(); // таймер изменения данных
+             timer_plan_change=esphome::millis(); // таймер изменения данных
           }
        });
     }
@@ -1015,7 +1016,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
     void loop() override {
         
-        uint32_t now=millis();
+        uint32_t now=esphome::millis();
         
         // проверяем входящий сигнал ресета
         if(in_reset_pin!=nullptr){
