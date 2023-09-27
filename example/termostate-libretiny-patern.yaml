@@ -15,22 +15,8 @@ esphome:
 bk72xx:
   board: cb3s
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_pass
-  manual_ip:
-    static_ip: !secret ip_tuya_termostate
-    gateway: !secret gateway 
-    subnet: !secret subnet
-    dns1: !secret dns1
-    dns2: !secret dns2
-  ap:
-    ssid:  ${upper_devicename} Hotspot
-    password: !secret ap_wifi_pass
-
 logger:
-    level: DEBUG
-    #level: VERBOSE
+    level: ERROR
     baud_rate: 0
     
 api:
@@ -40,17 +26,11 @@ ota:
 
 captive_portal:
     
-web_server:
-  port: 80
-  auth:
-    username: !secret web_user
-    password: !secret web_pass
-
 #последовательный порт
 uart:
   id: uart_bus
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: TX1
+  rx_pin: RX1
   baud_rate: 9600
   data_bits: 8
   parity: NONE
@@ -62,13 +42,12 @@ time:
 
 climate:
   - platform: tuya_termo
-    name: ${upper_devicename}
+    name: Moes Thermostate
     uart_id: uart_bus
     time_id: sync_time
     visual:
       min_temperature: 5
       max_temperature: 35
-      #temperature_step: 0.5 - требуются правки
       eco_temperature: 20
       overheat_temperature: 45
       deadzone_temperature: 1
