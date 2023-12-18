@@ -44,6 +44,7 @@ climate:
   - platform: tuya_termo
     name: Moes Thermostate
     uart_id: uart_bus
+    optimistic: true
     time_id: sync_time
     visual:
       min_temperature: 5
