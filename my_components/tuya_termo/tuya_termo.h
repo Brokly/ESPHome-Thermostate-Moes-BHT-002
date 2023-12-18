@@ -237,8 +237,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     std::vector<std::string> str_plan={w1,   w2,  w3,  w4,  w5,  w6,
                                        sa1, sa2, sa3, sa4, sa5, sa6,
                                        su1, su2, su3, su4, su5, su6};
- 
-     // поддерживаемые кондиционером опции
+    // режим ускоренного обновления 
+    bool _optimistic = true;
+    // поддерживаемые кондиционером опции
     std::set<ClimateMode> _supported_modes{climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_AUTO};
     std::set<ClimatePreset> _supported_presets{climate::CLIMATE_PRESET_ECO};
     // Шаблон параметров отображения виджета
@@ -513,10 +514,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        sendCommand(0x06,sizeof(setShed), setShed);
     }
 
-/////////////////////// РАЗБОР ВХОДЯЩИХ ДАННЫХ //////////////////////////
+/////////////////////// РАЗБОР ДАННЫХ ОТ MCU ТЕРМОСТАТА //////////////////////////
 
 // Статусные команды
 //                       receivedCommand[6], receivedCommand[5]
+
     bool processStatusCommand(uint8_t cByte, uint8_t commandLength) {
        bool get_change=false;
        if (cByte == 0x66 && commandLength==8){ // температура выносного датчика 
@@ -533,6 +535,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }        
        } else if (cByte == 0x1 && commandLength==5){ //ON-OFF
           ESP_LOGV(TAG,"GET ON/OFF state %u",receivedCommand[10]);
+          if(this->_optimistic && send_on!=UNDEF){ // в очереди установлена комана изменения режима работы
+             receivedCommand[10]=send_on;
+          }
           if(_on!=receivedCommand[10]){ // состояние питания изменилось
              _on=receivedCommand[10];
              get_change=true;
@@ -540,6 +545,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }        
        } else if (cByte == 0x2 && commandLength==8){ // целевая температура
           ESP_LOGV(TAG,"GET TARGET temperature %f", getTemp(receivedCommand[13]));
+          if(this->_optimistic && new_target_temp_raw!=0xFF){ // в очереди установлена тнмпература для отправки
+             receivedCommand[13]=new_target_temp_raw; // подменяем температуру в пакете
+          }
           if(target_temp_raw!=receivedCommand[13] && receivedCommand[13]!=0){ // показания изменились
              target_temp_raw=receivedCommand[13];
              get_change=true;
@@ -561,6 +569,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }        
        } else if (cByte == 0x4 && commandLength==5){ // режим мануал или по расписанию
           ESP_LOGV(TAG,"GET MANUAL/AUTO state %u", receivedCommand[10]);
+          if(this->_optimistic && send_manual!=UNDEF){ // в очереди команда на изменение
+             receivedCommand[10]=send_manual; // подменяем данные
+          }
           if(manualMode!=receivedCommand[10]){ // показания изменились
              manualMode=receivedCommand[10];
              get_change=true;
@@ -568,6 +579,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }        
        } else if (cByte == 0x5 && commandLength==5){ // режим ECO
           ESP_LOGV(TAG,"GET ECO state %u", receivedCommand[10]);
+          if(this->_optimistic && send_eco!=UNDEF){ // в очереди установлена комана изменения режима работы
+             receivedCommand[10]=send_eco;
+          }
           if(ecoMode!=receivedCommand[10]){ // показания изменились
              ecoMode=receivedCommand[10];
              get_change=true;
@@ -575,6 +589,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }        
        } else if (cByte == 0x6 && commandLength==5){ // режим LOCK
           ESP_LOGV(TAG,"Get LOCK state: %u", receivedCommand[10]);
+          if(this->_optimistic && send_lock!=UNDEF){ // в очереди установлена комана изменения режима работы
+             receivedCommand[10]=send_lock;
+          }
           bool new_state=(receivedCommand[10]==1);// полученый статус
           if(lock_switch!=nullptr && lock_switch->state!=new_state){
              lock_switch->publish_state(new_state);    
@@ -652,7 +669,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            break;
          }
          case 0x04: { //55 aa 01 04 00 00  ВОЗМОЖНО СИГНАЛ О НЕОБХОДИМОСТИ СБРОСА НАСТРОЙКИ
-           ESP_LOGV(TAG,"Setting reset\n");
+           ESP_LOGV(TAG,"Setting reset");
            sendComm(REPRES); // отвечаем что приняли ресет
            //sendCounter=1; // запускаем карусель
            knownCommand = true;
@@ -665,13 +682,13 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            break;
          }
          case 0x1C: {  //55 aa 01 1c 00 00 1c запрос времени
-           ESP_LOGV(TAG,"Date/time queue");
+           ESP_LOGV(TAG,"Date/time request");
            knownCommand = true;
            setDeviceTime(); // отвечаем временем
            break;
          }
-         case 0x2B: {  //55;AA;03;2B;00;00;2D   Хрен знает что, но в новых термостатах есть такая хрень
-           ESP_LOGV(TAG,"Bla-bla-bla");
+         case 0x2B: {  //55;AA;03;2B;00;00;2D
+           ESP_LOGV(TAG,"Network status request");
            knownCommand = true;
            setBlabla();
            break;
@@ -731,7 +748,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
       }
     }
 
-    // вызывается для публикации нового состояния кондиционера
+    // вызывается для публикации нового состояния климата
     void stateChanged() {
         bool need_publish=false; // флаг необходимости публикации
         // режим работы
@@ -795,7 +812,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            temp=getTemp(curr_int_temp_raw); // температура внутреннего датчика
         }
         
-        
+       
         if(this->mode == climate::CLIMATE_MODE_OFF){
            this->action= climate::CLIMATE_ACTION_OFF;  
         } else {
@@ -878,7 +895,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
                this->publish_state();
             }
         }
-        if(t_temp!=this->target_temperature || _presset!=this->preset || _mode!=this->mode){
+        if(this->_optimistic || t_temp!=this->target_temperature || _presset!=this->preset || _mode!=this->mode){
            stateChanged();
         }
     }
@@ -910,6 +927,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void set_visual_temperature_eco(float val){this->temperature_eco=val;}
     void set_visual_temperature_overheat(float val){this->temperature_overheat=val;}
     void set_visual_temperature_deadzone(float val){this->temperature_deadzone=val;}
+    void set_optimistic(bool optimistic) { this->_optimistic = optimistic;}
+    bool get_optimistic() { return this->_optimistic; }
 
     // подключение чилдрен лок
     void set_children_lock_switch(TuyaTermo_Switch* switch_){ // подключение свитча children lock
@@ -1007,6 +1026,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         ESP_LOGCONFIG(TAG, "Tuya Termostate:");
         LOG_TEXT_SENSOR("  ", "MCU product ID", this->sensor_mcu_id_);
         ESP_LOGCONFIG(TAG, "  Firmware version: %s", TERMO_FIRMWARE_VERSION.c_str());
+        ESP_LOGCONFIG(TAG, "Optimistic: %s", TRUEFALSE(this->_optimistic));
         LOG_SENSOR("  ", "Internal Temperature", this->sensor_internal_temperature_);
         LOG_SENSOR("  ", "External Temperature", this->sensor_external_temperature_);
         LOG_SWITCH("  ", "Children lock switch", this->lock_switch);

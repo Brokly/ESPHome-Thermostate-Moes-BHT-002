@@ -8,6 +8,7 @@ from esphome.const import (
     CONF_ID,
     CONF_UART_ID,
     CONF_INTERNAL,
+    CONF_OPTIMISTIC,
     CONF_DATA,
     CONF_NUMBER,
     CONF_SUPPORTED_MODES,
@@ -95,6 +96,7 @@ CONFIG_SCHEMA = cv.All(
     climate.CLIMATE_SCHEMA.extend(
         {
             cv.GenerateID(): cv.declare_id(TuyaTermo),
+            cv.Optional(CONF_OPTIMISTIC, default="true"): cv.boolean,
             cv.Optional(CONF_VISUAL, default={}): cv.Schema(
               {
                 cv.Optional(CONF_MIN_TEMPERATURE, default=5.0): cv.temperature,
@@ -190,6 +192,8 @@ async def to_code(config):
        raise cv.Invalid(
           f"Setting 'uart_id' is required !"
        )
+    
+    cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
 
     if CONF_TIME_ID in config:
         time_ = await cg.get_variable(config[CONF_TIME_ID])
