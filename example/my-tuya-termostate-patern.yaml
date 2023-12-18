@@ -165,6 +165,7 @@ climate:
 # кастом МОЕS термостат
   - platform: tuya_termo
     name: ${upper_devicename}
+    optimistic: true
     uart_id: uart_bus
     time_id: sync_time
     visual:
