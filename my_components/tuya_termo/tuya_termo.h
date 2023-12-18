@@ -207,7 +207,7 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
 class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
    private:
     
-    const std::string TERMO_FIRMWARE_VERSION = "0.0.1";
+    const std::string TERMO_FIRMWARE_VERSION = "0.0.2";
     // хидер протокола обмена с термостатом
     const uint8_t COMMAND_START[2] = {0x55, 0xAA};
     const uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
