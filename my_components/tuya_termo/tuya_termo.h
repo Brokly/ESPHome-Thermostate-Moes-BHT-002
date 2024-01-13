@@ -3,10 +3,6 @@
 #ifndef TUYA_TERMO_H
 #define TUYA_TERMO_H
 
-// Скачать оригинальную прошиву: esptool -p com4 read_flash 0x00000 0x100000 fitmware1M.bin
-// Залить прошивку : esptool -p com4 write_flash -fs 1MB 0x0 fitmware1M.bin
-// 
-
 #include <Arduino.h>
 #include <stdarg.h>
 #include <vector>
@@ -91,7 +87,7 @@ class TuyaTermo;
 struct termoSet{
    uint8_t minutes=0;
    uint8_t hours=0;
-   uint8_t _temp=20;
+   int8_t _temp=20;
    float temp(){
       return ((float)_temp)/2;  
    }
@@ -126,7 +122,7 @@ struct sPeriods{
    // получение температуры из плана в соотвествии с временем и днем
    uint8_t get_plan_current_temp_raw(uint8_t day_of_week, uint8_t hours, uint8_t minutes){
       ESP_LOGV(TAG,"Find current period day of week: %u, hour: %u, min: %u", day_of_week,  hours,  minutes);
-      uint8_t temp=0;  //стартовая температура поиска
+      int8_t temp=0;  //стартовая температура поиска
       uint8_t start=0; //точка старта поиска
       if(day_of_week==1){// понедельник
          temp=17; //для понедельника стартовая температура последняя в воскресение
@@ -141,7 +137,7 @@ struct sPeriods{
          temp=5; //для рабочих не понедельников стартовая температура последняя в рабочий день
          start=0;
       }   
-      ESP_LOGV(TAG,"Params run: temp=%u, start=%u", temp, start);
+      ESP_LOGV(TAG,"Params run: temp=%d, start=%u", temp, start);
       temp=d[temp]._temp; //загрузили стартовую температуру
       uint16_t curr_min=(uint16_t)60*hours+minutes; //поисковое время в минутах
       for(uint8_t i=start; i<start+6; i++){ //ищем температуру в соответствующий промежуток времени
@@ -149,7 +145,7 @@ struct sPeriods{
          ESP_LOGV(TAG,"Iter: %u, curr_min: %u, period_min: %u,  HOUR:%u MIN:%u", i, curr_min, period_min, d[i].hours, d[i].minutes);
          if(curr_min>=period_min){
             temp=d[i]._temp;
-            ESP_LOGV(TAG,"Get next raw temperature: %u", temp);
+            ESP_LOGV(TAG,"Get next raw temperature: %d", temp);
          } else {
             break;
          }
@@ -304,7 +300,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     bool plan_staff=false; // флаг поднимается во время переключения в селекте, для блокировки изменения данных
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
-       return float(raw)/2;
+       return float((int8_t)raw)/2;
     }
 
     void _debugMsg(const String &msg, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0, ...) {
@@ -890,7 +886,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         if (call.get_target_temperature().has_value()) {
             this->target_temperature=*call.get_target_temperature();
             if((_on==ON && manualMode==ON) || this->mode == climate::CLIMATE_MODE_HEAT) { // целевую температуру меняем только в режиме нагрева
-               new_target_temp_raw= (uint8_t)(this->target_temperature*2); // новая целевая температура, для отправки термостату
+               new_target_temp_raw= (uint8_t)((int8_t)(this->target_temperature)*2); // новая целевая температура, для отправки термостату
             } else {
                this->publish_state();
             }
