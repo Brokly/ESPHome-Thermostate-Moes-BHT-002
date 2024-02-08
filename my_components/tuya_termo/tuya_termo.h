@@ -22,6 +22,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
+#define ESP_MY_DEBUG ESP_LOGE // для удобства отладки, могу переключить сообщения от компонента на любой уровень
 
 // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 //#define HOLMS 19
@@ -53,17 +54,26 @@ using time::RealTimeClock;
 using uart::UARTDevice;  
 using uart::UARTComponent;
 
+// настройки таймаутов
+    const uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
+    const uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
+    const uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
+    const uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
+    const uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
+    const uint32_t NO_TEMP_RESTART_TIMEOUT = 20; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
+
 // типы запросов
 enum tCommand:uint8_t {PING=0,   //- периодический PING 
                        IDENT=1,  //- запрос идентификатора устройства
                        STAT=2,   //- запрос статуса термостата (занят и т.д.)
+                       NETSTAT=3,//- статус связи с сервером
                        REPRES=4, //- ответ на ресет
                        DATA=8    //- запрос настроек термостата (расписание, режимы ECO, MANUAL, LOCK и пр.) 
 }; 
 
 // типы команд
 enum tMode:uint16_t {POWER=0x0101,  //- включение/выключение
-                    MANUAL=0x0404,  //- режим
+                    MANUAL=0x0404,  //- режим MANUAL
                     ECO=0x0501,     //- эко
                     LOCK=0x0601     //- чилдрен лок
 };
@@ -121,7 +131,7 @@ struct sPeriods{
    }
    // получение температуры из плана в соотвествии с временем и днем
    uint8_t get_plan_current_temp_raw(uint8_t day_of_week, uint8_t hours, uint8_t minutes){
-      ESP_LOGV(TAG,"Find current period day of week: %u, hour: %u, min: %u", day_of_week,  hours,  minutes);
+      ESP_MY_DEBUG(TAG,"Find current period day of week: %u, hour: %u, min: %u", day_of_week,  hours,  minutes);
       int8_t temp=0;  //стартовая температура поиска
       uint8_t start=0; //точка старта поиска
       if(day_of_week==1){// понедельник
@@ -137,15 +147,15 @@ struct sPeriods{
          temp=5; //для рабочих не понедельников стартовая температура последняя в рабочий день
          start=0;
       }   
-      ESP_LOGV(TAG,"Params run: temp=%d, start=%u", temp, start);
+      ESP_MY_DEBUG(TAG,"Params run: temp=%d, start=%u", temp, start);
       temp=d[temp]._temp; //загрузили стартовую температуру
       uint16_t curr_min=(uint16_t)60*hours+minutes; //поисковое время в минутах
       for(uint8_t i=start; i<start+6; i++){ //ищем температуру в соответствующий промежуток времени
          uint16_t period_min=(uint16_t)60*d[i].hours+d[i].minutes; //время периода в минутах
-         ESP_LOGV(TAG,"Iter: %u, curr_min: %u, period_min: %u,  HOUR:%u MIN:%u", i, curr_min, period_min, d[i].hours, d[i].minutes);
+         //ESP_MY_DEBUG(TAG,"Iter: %u, curr_min: %u, period_min: %u,  HOUR:%u MIN:%u", i, curr_min, period_min, d[i].hours, d[i].minutes);
          if(curr_min>=period_min){
             temp=d[i]._temp;
-            ESP_LOGV(TAG,"Get next raw temperature: %d", temp);
+            ESP_MY_DEBUG(TAG,"Get next raw temperature: %d", temp);
          } else {
             break;
          }
@@ -194,7 +204,7 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
        //... 
     //};
     void control(const LockCall &call) override {
-       ESP_LOGV(TAG,"LOCK CONTROL !!!");   
+       ESP_MY_DEBUG(TAG,"LOCK CONTROL !!!");   
     }
  friend class TuyaTermo;   
 };
@@ -203,14 +213,9 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
 class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
    private:
     
-    const std::string TERMO_FIRMWARE_VERSION = "0.0.2";
+    const std::string TERMO_FIRMWARE_VERSION = "0.0.4";
     // хидер протокола обмена с термостатом
     const uint8_t COMMAND_START[2] = {0x55, 0xAA};
-    const uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
-    const uint32_t UART_TIMEOUT = 250; //1000; !!!НОВАЯ ВЕРСИЯ!!! время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
-    const uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
-    const uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
-
     // для Select
     const std::string w1="Week day 1";
     const std::string w2="Week day 2";
@@ -279,7 +284,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     uint32_t lastSend=0; // время отправки последнего байта
     uint32_t lastRead=0; // время получения последнего байта
     bool sendRight=false; //флаг разрешения внеочередной отправки данных, когда идентификатор полученного ответа от терстата совпал с запросом
- 
+    uint32_t dataTempTimer=0; // таймер контроля получения данных о температуре
     // numbers для установки расписания
     TuyaTermo_Number* hours_number=nullptr; 
     TuyaTermo_Number* minutes_number=nullptr;
@@ -292,6 +297,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     GPIOPin* in_reset_pin{nullptr};
     uint8_t  in_reset_pin_state=0xAA;
     uint32_t reset_timer=0; // таймер ресета, задержка после получения сигнала 
+    uint8_t mcu_vers=0; // версия MCU термостата, от этого зависит протокол
 
     // для обслуживания изменеия расписания
     sPeriods plan; // план работы в режиме авто
@@ -315,7 +321,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         va_end(vl);
     }
 
-    void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0) {
+    //void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0) {
+    void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_ERROR, unsigned int line = 0) {
         String st = "";
         char textBuf[11];
 
@@ -371,7 +378,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
     // публикация текущего режима работы климата
     void check_action(){
-        ESP_LOGV(TAG, "Current state publicate - not released");
+        ESP_MY_DEBUG(TAG, "Current state publicate - not released");
     }
 
     // получить текст из буфера данных
@@ -447,35 +454,35 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 //отправка статусных запросов
     void inline sendComm(tCommand comm){
-       ESP_LOGV(TAG,"Send short command: %u", comm);
+       ESP_MY_DEBUG(TAG,"Send short command: %u", comm);
        sendCommand((uint8_t)comm);  
     }
 
 //отправка  статусных команд
     void sendComm(tMode type, tStat state){
-       ESP_LOGV(TAG,"Send status command: 0x%04X - %u", type, state);
+       ESP_MY_DEBUG(TAG,"Send status command: 0x%04X - %u", type, state);
        uint8_t setComm[]={(uint8_t)(((uint16_t)type)/0x100), (uint8_t)type, 0x00, 0x01, (uint8_t)state};  
        sendCommand(0x06, sizeof(setComm), setComm);   
     }
 
 //отправка инфо о статусе модуля связи, это влияет на отдачу данных в модуль связи
     void sendMainState(tMainState state) {
-       ESP_LOGV(TAG,"Send main status: %u", state);
+       ESP_MY_DEBUG(TAG,"Send main status: %u", state);
        uint8_t temp=(uint8_t)state;
-       sendCommand(0x03, 1, &temp);
+       sendCommand(NETSTAT, 1, &temp);
     }
 
 // отправка непонятной хрени
     void setBlabla(){
-       ESP_LOGV(TAG,"Send Bla-bla-bla reply");
+       ESP_MY_DEBUG(TAG,"Send Bla-bla-bla reply");
        uint8_t BlaBla=0x04;
        sendCommand(0x2B,1,&BlaBla);   
     }
 
 // отправка времени термостату
     void setDeviceTime() {
+       uint8_t dateTime[]={0x01, 0, 0, 0, 0, 0, 0, 0};
        if(time_!=nullptr){
-          uint8_t dateTime[]={0x01, 0, 0, 0, 0, 0, 0, 0};
           auto now = time_->now(); // в устройство льем время в соответствии с временной зоной
           if (!now.is_valid()) {
              ESP_LOGE(TAG,"System time not syncing !");
@@ -489,22 +496,22 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              dateTime[5]=now.minute;
              dateTime[6]=now.second;
              dateTime[7]=day_core[now.day_of_week];
-             ESP_LOGV(TAG,"Send time");
-             sendCommand(0x1C, sizeof(dateTime), dateTime);
+             ESP_MY_DEBUG(TAG,"Send time");
          }
-       }   
+       }           
+       sendCommand(0x1C, sizeof(dateTime), dateTime);
     }
 
 // отправка целевой температуры
     void setTargetTemp(uint8_t temp){
-       ESP_LOGV(TAG,"Send target temperature: %f",getTemp(temp));
+       ESP_MY_DEBUG(TAG,"Send target temperature: %f",getTemp(temp));
        uint8_t setTemp[]={0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, temp};
        sendCommand(0x06,sizeof(setTemp), setTemp);   
     }
 
 // отправка данных о расписании
     void setShedule(sPeriods* shedule){
-       ESP_LOGV(TAG,"Send AUTO plan");
+       ESP_MY_DEBUG(TAG,"Send AUTO plan");
        uint8_t setShed[58]={0x65, 0x00, 0x00, 0x36};
        memcpy(setShed+4,shedule,sizeof(sPeriods));
        sendCommand(0x06,sizeof(setShed), setShed);
@@ -512,51 +519,71 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 /////////////////////// РАЗБОР ДАННЫХ ОТ MCU ТЕРМОСТАТА //////////////////////////
 
+    // проверка параметров логических выключателей ON/OFF, ECO, AUTO, LOCK
+    // в случае синхронизации данных - очистка флагов, обработка режима optimistic
+    void checkSwitch(tStat* par){
+       if(*par!=UNDEF){ // в очереди установлена комана изменения режима работы
+          if(receivedCommand[10]==*par){ // если в очереди тот же режим о котором ответил термостат
+             *par=UNDEF; // сбрасываем передачу команды
+          } else if(this->_optimistic){ // в оптимистик, если режимы отличаются, делаем вид, что все ок, но очередь не чистим
+             receivedCommand[10]=*par;
+          }                
+       }
+    }
+
 // Статусные команды
 //                       receivedCommand[6], receivedCommand[5]
 
     bool processStatusCommand(uint8_t cByte, uint8_t commandLength) {
        bool get_change=false;
+       uint32_t now=esphome::millis();
        if (cByte == 0x66 && commandLength==8){ // температура выносного датчика 
        // НОВЫЕ ВЕРСИИ ТЕРМОСТАТА МОГУТ НЕ ВЫДАВАТЬ ТЕМПЕРАТУРУ, ПАКЕТ ЕСТЬ, А В ПАКЕТЕ ЗНАЧЕНИЕ = 0, А ЭО ЗНАЧИТ, ЧТО ЕГО НЕТ
-          ESP_LOGV(TAG,"Get EXTERNAL temperature %f",getTemp(receivedCommand[13]));
+          ESP_MY_DEBUG(TAG,"Get External temperature %f",getTemp(receivedCommand[13]));
+          dataTempTimer=now;
           if(curr_ext_temp_raw!=receivedCommand[13] && receivedCommand[13]!=0){ // температура изменилась 
              curr_ext_temp_raw=receivedCommand[13];
              get_change=true;
              float temp=getTemp(curr_ext_temp_raw);
-             ESP_LOGV(TAG,"New EXTERNAL temperature %f",temp);
+             ESP_MY_DEBUG(TAG,"New External temperature %f",temp);
              if(sensor_external_temperature_!=nullptr){
                 sensor_external_temperature_->publish_state(temp);
              }
           }        
        } else if (cByte == 0x1 && commandLength==5){ //ON-OFF
-          ESP_LOGV(TAG,"GET ON/OFF state %u",receivedCommand[10]);
-          if(this->_optimistic && send_on!=UNDEF){ // в очереди установлена комана изменения режима работы
-             receivedCommand[10]=send_on;
-          }
+          ESP_MY_DEBUG(TAG,"Get ON/OFF state %u",receivedCommand[10]);
+          checkSwitch(&send_on);
           if(_on!=receivedCommand[10]){ // состояние питания изменилось
              _on=receivedCommand[10];
              get_change=true;
-             ESP_LOGV(TAG,"Change ON to %u", _on);
-          }        
-       } else if (cByte == 0x2 && commandLength==8){ // целевая температура
-          ESP_LOGV(TAG,"GET TARGET temperature %f", getTemp(receivedCommand[13]));
-          if(this->_optimistic && new_target_temp_raw!=0xFF){ // в очереди установлена тнмпература для отправки
-             receivedCommand[13]=new_target_temp_raw; // подменяем температуру в пакете
+             ESP_MY_DEBUG(TAG,"Change ON to %u", _on);
           }
+          if(sendCounter==4){ // если это пришло во время запроса полных данных
+             sendCounter++;
+          }
+       } else if (cByte == 0x2 && commandLength==8){ // целевая температура
+          ESP_MY_DEBUG(TAG,"Get Target temperature %f", getTemp(receivedCommand[13]));
+          if(new_target_temp_raw!=0xFF){ // в очереди установлена смена целевой температуры
+             if(receivedCommand[13]==new_target_temp_raw){ // температуры синхронизировались
+                new_target_temp_raw=0xFF; // чистим флаг отправки, больше новые данные не передаем
+             } else if(this->_optimistic){ // в оптимистик, если режимы отличаются, делаем вид, что все ок, но очередь не чистим
+                receivedCommand[13]=new_target_temp_raw;
+             }
+          }                
           if(target_temp_raw!=receivedCommand[13] && receivedCommand[13]!=0){ // показания изменились
              target_temp_raw=receivedCommand[13];
              get_change=true;
              float temp=getTemp(target_temp_raw);
-             ESP_LOGV(TAG,"New TARGET temperature %f", temp);
+             ESP_MY_DEBUG(TAG,"New Target temperature %f", temp);
           }        
        } else if (cByte == 0x3 && commandLength==8){ // температура внутеннего датчика
-          ESP_LOGV(TAG,"GET INTERNAL temperature %f", getTemp(receivedCommand[13]));
+          ESP_MY_DEBUG(TAG,"Get Internal temperature %f", getTemp(receivedCommand[13]));
+          dataTempTimer=now;
           if(curr_int_temp_raw!=receivedCommand[13] && receivedCommand[13]!=0){ // показания изменились
              curr_int_temp_raw=receivedCommand[13];
              get_change=true;
              float temp=getTemp(curr_int_temp_raw);
-             ESP_LOGV(TAG,"New INTERNAL temperature %f",temp);
+             ESP_MY_DEBUG(TAG,"New Internal temperature %f",temp);
              if(sensor_internal_temperature_!=nullptr){
                 sensor_internal_temperature_->publish_state(temp);
              }
@@ -564,57 +591,58 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              this->publish_state();
           }        
        } else if (cByte == 0x4 && commandLength==5){ // режим мануал или по расписанию
-          ESP_LOGV(TAG,"GET MANUAL/AUTO state %u", receivedCommand[10]);
-          if(this->_optimistic && send_manual!=UNDEF){ // в очереди команда на изменение
-             receivedCommand[10]=send_manual; // подменяем данные
-          }
+          ESP_MY_DEBUG(TAG,"Get Manual state %u", receivedCommand[10]);
+          checkSwitch(&send_manual);
           if(manualMode!=receivedCommand[10]){ // показания изменились
              manualMode=receivedCommand[10];
              get_change=true;
-             ESP_LOGV(TAG,"Change MANUAL to %u", manualMode);
+             ESP_MY_DEBUG(TAG,"Change Manual to %u", manualMode);
           }        
        } else if (cByte == 0x5 && commandLength==5){ // режим ECO
-          ESP_LOGV(TAG,"GET ECO state %u", receivedCommand[10]);
-          if(this->_optimistic && send_eco!=UNDEF){ // в очереди установлена комана изменения режима работы
-             receivedCommand[10]=send_eco;
-          }
+          ESP_MY_DEBUG(TAG,"Get ECO state %u", receivedCommand[10]);
+          checkSwitch(&send_eco);
           if(ecoMode!=receivedCommand[10]){ // показания изменились
              ecoMode=receivedCommand[10];
              get_change=true;
-             ESP_LOGV(TAG,"Change ECO to %u", ecoMode);
+             ESP_MY_DEBUG(TAG,"Change ECO to %u", ecoMode);
           }        
        } else if (cByte == 0x6 && commandLength==5){ // режим LOCK
-          ESP_LOGV(TAG,"Get LOCK state: %u", receivedCommand[10]);
-          if(this->_optimistic && send_lock!=UNDEF){ // в очереди установлена комана изменения режима работы
-             receivedCommand[10]=send_lock;
-          }
+          ESP_MY_DEBUG(TAG,"Get Lock state: %u", receivedCommand[10]);
+          checkSwitch(&send_lock);
           bool new_state=(receivedCommand[10]==1);// полученый статус
           if(lock_switch!=nullptr && lock_switch->state!=new_state){
              lock_switch->publish_state(new_state);    
           }
           get_change=true;
-       } else if (cByte == 0x65 && commandLength==58){ // расписание
-          ESP_LOGV(TAG,"GET PERIOD settings");
+       } else if (cByte == 0x65 && commandLength==58){ // получили расписание
+          ESP_MY_DEBUG(TAG,"Get Schedule settings");
           if(memcmp((uint8_t*)(&plan),&(receivedCommand[10]),sizeof(plan))!=0){
-             memcpy((uint8_t*)(&plan),&(receivedCommand[10]),sizeof(plan));
-             ESP_LOGV(TAG,"Get new periods settings");
-             refresh_controls(current_select_pos);
-             get_change=true;
+             if(timer_plan_change!=0){ // флаг изменения расписания не установлен, значит изменили с термостата
+                memcpy((uint8_t*)(&plan),&(receivedCommand[10]),sizeof(plan));
+                ESP_MY_DEBUG(TAG,"New Schedule settings");
+                refresh_controls(current_select_pos);
+                get_change=true;
+             } 
+          } else {
+             timer_plan_change=0; // все синхронизировано, больше не шлем расписание
+          }
+          if(send_on==ON){ // ИСКЛЮЧЕНИЕ: при включении MCU на запрос отвечает сначала расписанием
+             send_on=UNDEF;
           }
        } else if (cByte == 0x67 && commandLength==5){ // неизвестный переключатель
-          ESP_LOGV(TAG,"Get UNKNOWN_67 state: %u", receivedCommand[10]);
+          ESP_MY_DEBUG(TAG,"Get Unknown_67 state: %u", receivedCommand[10]);
           if(unknowMode_67!=receivedCommand[10]){ // показания изменились
              unknowMode_67=receivedCommand[10];
-             ESP_LOGE(TAG,"Get new UNKNOWN_67 value: %u",unknowMode_67);
+             ESP_MY_DEBUG(TAG,"New Unknown_67 value: %u",unknowMode_67);
           } 
        } else if (cByte == 0x68 && commandLength==5){ // неизвестный переключатель
-          ESP_LOGV(TAG,"Get UNKNOWN_68 state: %u", receivedCommand[10]);
+          ESP_MY_DEBUG(TAG,"Get Unknown_68 state: %u", receivedCommand[10]);
           if(unknowMode_68!=receivedCommand[10]){ // показания изменились
              unknowMode_68=receivedCommand[10];
-             ESP_LOGE(TAG,"Get new UNKNOWN_68 value: %u",unknowMode_68);
+             ESP_MY_DEBUG(TAG,"New Unknown_68 value: %u",unknowMode_68);
           } 
        } else { // такую команду не знаем
-          ESP_LOGE(TAG,"Command  0x%x - unknown", cByte);
+          ESP_LOGE(TAG,"Get Unknown Command: 0x%x", cByte);
           return false;
        } 
        if(get_change){
@@ -626,17 +654,18 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // Разбор служебных пакетов
 //                       receivedCommand[3], receivedCommand[5]
-    bool processCommand(uint8_t commandByte, uint8_t length) {
+// 3 байт у старого протокола 1 , у нового 3
+    bool processCommand(uint8_t commandByte/*3*/, uint8_t length/*5*/) {
        bool knownCommand = false;
        switch (commandByte) {
          case 0x00: {
            switch (receivedCommand[6]) {
-             case 0x00 : //55 aa 01 00 00 01 00: first heartbeat
-                ESP_LOGV(TAG,"First heartbeat");
+             case 0x00 : //55 aa 01(03) 00 00 01 00: first heartbeat
+                ESP_MY_DEBUG(TAG,"Get First heartbeat");
                 knownCommand = true;
                 break;
-             case 0x01 : //55 aa 01 00 00 01 01: every heartbeat after
-                ESP_LOGV(TAG,"Every heartbeat after %d",esphome::millis());
+             case 0x01 : //55 aa 01(03) 00 00 01 01: every heartbeat after
+                ESP_MY_DEBUG(TAG,"Get Every heartbeat after %d",esphome::millis());
                 knownCommand = true;
                 break;
            }
@@ -644,47 +673,53 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
          }
          case 0x01: { // идентификатор изделия
            String id=getStringFromBuff((uint8_t*)receivedCommand+6,length);
-           ESP_LOGV(TAG,"Product info received: %s", id.c_str());
+           ESP_MY_DEBUG(TAG,"Get Product info: %s", id.c_str());
            if(sensor_mcu_id_!=nullptr){
               sensor_mcu_id_->publish_state(id.c_str());   
            }
            knownCommand = true;
+           if(sendCounter==2){ // пришел ответ на команду, переходим дальше
+              sendCounter++;
+           }
            break;
          }
-         case 0x02: { //0x55 0xAA  0x01  0x02  0x00  0x00  0x02 , ПОХОЖЕ НА РЕСЕТ ПРОВЕРИТЬ ДЛИННОЕ НАЖАТИЕ
-           ESP_LOGV(TAG,"Get reset signal");
+         case 0x02: { //0x55 0xAA  0x01(03)  0x02  0x00  0x00  CS , ПОХОЖЕ НА РЕСЕТ ПРОВЕРИТЬ ДЛИННОЕ НАЖАТИЕ
+           ESP_MY_DEBUG(TAG,"Get Confirm reply");
            if (receivedCommand[5] == 0x00) { // у большинства термостатов это означает , что необходимо запростить данные
              sendCounter=4; // переход к передаче статуса wifi
              knownCommand = true;
            }
            break;
          }
-         case 0x03: { //55 aa 01 03 00 00,  ОТВЕТ ТЕРМОСТАТА НА ИНФОРМИРОВАНИЕ О СТАТУСЕ WIFI 
-           ESP_LOGV(TAG,"Reply on inform WIFI state");
+         case 0x03: { //55 aa 01(03) 03 00 00 CS,  ОТВЕТ ТЕРМОСТАТА НА ИНФОРМИРОВАНИЕ О СТАТУСЕ WIFI 
+           ESP_MY_DEBUG(TAG,"Get Confirm Network reply");
            knownCommand = true;
+           if(sendCounter>=5 && sendCounter<=8){ // пришел ответ на команду, переходим дальше
+              sendCounter++;
+           }
            break;
          }
-         case 0x04: { //55 aa 01 04 00 00  ВОЗМОЖНО СИГНАЛ О НЕОБХОДИМОСТИ СБРОСА НАСТРОЙКИ
-           ESP_LOGV(TAG,"Setting reset");
+         case 0x04: { //55 aa 01(03) 04 00 00 CS, ВОЗМОЖНО СИГНАЛ О НЕОБХОДИМОСТИ СБРОСА НАСТРОЙКИ
+           ESP_MY_DEBUG(TAG,"Get Setting reset");
            sendComm(REPRES); // отвечаем что приняли ресет
-           //sendCounter=1; // запускаем карусель
+           sendCounter=1; // запускаем карусель
            knownCommand = true;
            break;
          }
          case 0x05: {  // ресет - мигает экран
-           //55 aa 01 05 00 00
-           ESP_LOGV(TAG,"Reset WiFi selection");
+           //55 aa 01(03) 05 00 00
+           ESP_MY_DEBUG(TAG,"Get Net setting mode");
            knownCommand = true;
            break;
          }
-         case 0x1C: {  //55 aa 01 1c 00 00 1c запрос времени
-           ESP_LOGV(TAG,"Date/time request");
+         case 0x1C: {  //55 aa 01(03) 1c 00 00 1c запрос времени
+           ESP_MY_DEBUG(TAG,"Get Date/time request");
            knownCommand = true;
            setDeviceTime(); // отвечаем временем
            break;
          }
          case 0x2B: {  //55;AA;03;2B;00;00;2D
-           ESP_LOGV(TAG,"Network status request");
+           ESP_MY_DEBUG(TAG,"Get Unexpect request");
            knownCommand = true;
            setBlabla();
            break;
@@ -698,6 +733,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        _debugPrintPacket(receivedCommand, receiveIndex+1, false);
        if (commandLength > -1) {
           bool knownCommand = false;
+          mcu_vers=receivedCommand[2]; // запоминаем версию протокола MCU термостата
           if (receivedCommand[3] == 0x07) { // пакет о статусе
             knownCommand = processStatusCommand(receivedCommand[6], receivedCommand[5]);
           } else { // служебный пакет
@@ -715,7 +751,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
       if((int16_t)(sizeof(receivedCommand))>receiveIndex){ // контроль переполнения буфера входных данных
          receiveIndex++;
       }
-      lastRead=esphome::millis();//время чтения последнего байта
       receivedCommand[receiveIndex] = inChar;
       if(receiveIndex==0 && COMMAND_START[0] != inChar){ //проверка хидера 55
          resetAll(); //  не совпало - ресетимся
@@ -832,14 +867,14 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }               
         }
         if(old_temp_action!=this->action || need_publish){ // бликуем при необходимости
-           ESP_LOGV(TAG,"State changed, %f, %f",this->current_temperature, temp);
+           ESP_MY_DEBUG(TAG,"State changed, %f, %f",this->current_temperature, temp);
            this->publish_state();
         }
     }
 
     // вызывается пользователем из интерфейса ESPHome или Home Assistant
     void control(const esphome::climate::ClimateCall &call) override {
-        ESP_LOGV(TAG,"State changed from user.");
+        ESP_MY_DEBUG(TAG,"State changed from user.");
         bool need_pub=false;
         // Проверка режима
         auto _mode=this->mode;
@@ -847,17 +882,32 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
             ClimateMode mode = *call.get_mode();
             switch (mode) {
                 case climate::CLIMATE_MODE_OFF:
-                    if(_on!=OFF) send_on=OFF;
+                    if(_on!=OFF) {
+                        send_on=OFF;
+                        ESP_MY_DEBUG(TAG,"User set OFF");
+                    }
                     this->mode = mode;
                     break;
                 case climate::CLIMATE_MODE_HEAT:
-                    if(_on!=ON) send_on=ON;
-                    if(manualMode!=ON) send_manual=ON;
+                    if(_on!=ON){
+                        send_on=ON;
+                        ESP_MY_DEBUG(TAG,"User set ON+HEAT");
+                    }
+                    if(manualMode!=ON) {
+                        send_manual=ON;
+                        ESP_MY_DEBUG(TAG,"User set MANUAL");
+                    }
                     this->mode = mode;
                     break;
                 case climate::CLIMATE_MODE_AUTO:
-                    if(_on!=ON) send_on=ON;
-                    if(manualMode!=OFF) send_manual=OFF;
+                    if(_on!=ON) {
+                        send_on=ON;
+                        ESP_MY_DEBUG(TAG,"User set ON+AUTO");
+                    }
+                    if(manualMode!=OFF) {
+                        send_manual=OFF;
+                        ESP_MY_DEBUG(TAG,"User set OFF+AUTO");
+                    }
                     this->mode = mode;
                     break;
                 default:
@@ -870,11 +920,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
             ClimatePreset preset = *call.get_preset();
             switch (preset) {
                 case climate::CLIMATE_PRESET_ECO:
-                    if(ecoMode!=ON) send_eco=ON;
+                    if(ecoMode!=ON) {
+                        send_eco=ON;
+                        ESP_MY_DEBUG(TAG,"User set ECO ON");
+                    }
                     this->preset = preset;
                     break;
                 case climate::CLIMATE_PRESET_NONE:
-                    if(ecoMode!=OFF) send_eco=OFF;
+                    if(ecoMode!=OFF) {
+                        send_eco=OFF;
+                        ESP_MY_DEBUG(TAG,"User set ECO OFF");
+                    }
                     this->preset = preset;
                     break;
                 default:
@@ -887,6 +943,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
             this->target_temperature=*call.get_target_temperature();
             if((_on==ON && manualMode==ON) || this->mode == climate::CLIMATE_MODE_HEAT) { // целевую температуру меняем только в режиме нагрева
                new_target_temp_raw= (uint8_t)((int8_t)(this->target_temperature)*2); // новая целевая температура, для отправки термостату
+               ESP_MY_DEBUG(TAG,"User set new target temp: %d", this->target_temperature);
             } else {
                this->publish_state();
             }
@@ -1068,24 +1125,27 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              in_reset_pin_state=val;
              reset_timer=now;
            } else if(now-reset_timer>2000){ // изменение сигнала было больше 2 сек назад
-              ESP_LOGV(TAG,"Get inbound RESET, restart protocol interchange");
+              ESP_MY_DEBUG(TAG,"Get inbound RESET, restart protocol interchange");
               reset_timer=0;
               sendCounter=1; // начать крутить шарманку опроса с начала
            }
         }
 
         static uint32_t cycle_reset_timer=0;
-        if (now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000){ // каждые 20 минут опрашиваем MCU c нуля
-           ESP_LOGV(TAG,"Cuclic auto restart protocol interchange");
+        if ((now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000) || 
+                        (now-dataTempTimer> NO_TEMP_RESTART_TIMEOUT*1000)){ // каждые XX минут опрашиваем MCU c нуля или по таймауту если долго не получаем температуру
+           ESP_MY_DEBUG(TAG,"Cuclic auto restart protocol interchange");
            cycle_reset_timer=now;
+           dataTempTimer=now;
            sendCounter=1; // начать крутить шарманку опроса с начала
         }
 
         // читаем UART порт
         if (_tuya_serial!=nullptr){
-           if(_tuya_serial->available()){ //читаем
+           while(_tuya_serial->available()){ //читаем
               uint8_t data;
               _tuya_serial->read_byte(&data);
+              lastRead=esphome::millis();//время чтения последнего байта
               inData(data, now); // обрабатываем
            }               
         }
@@ -1103,51 +1163,64 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         if(now-lastSend>UART_TIMEOUT && (now-lastRead>UART_TIMEOUT || sendRight)){ //можно отправлять
           sendRight=false;
           if(sendCounter==1){ // отправим первый heatbear
+             ESP_MY_DEBUG(TAG,"Send first PING");          
              sendComm(PING); 
              sendCounter++;
           } else if(sendCounter==2){
+             ESP_MY_DEBUG(TAG,"Send Prod_ID request");          
              sendComm(IDENT);
-             sendCounter++;
           } else if(sendCounter==3){
+             ESP_MY_DEBUG(TAG,"Send State request");          
              sendComm(STAT);
-             sendCounter++;
           } else if(sendCounter==4){
+             ESP_MY_DEBUG(TAG,"Send Setting request");          
              sendComm(DATA);
-             sendCounter++;
           } else if(sendCounter==5){
+             ESP_MY_DEBUG(TAG,"Send net status 0");          
              sendMainState(wsPROC);  // непоянтно зачем это и как должно работать, смысла не вижу значек wifi проявить не удалось
-             sendCounter++;
           } else if(sendCounter==6){ 
+             ESP_MY_DEBUG(TAG,"Send net status OK");          
              sendMainState(wsOK); // непоянтно зачем это и как должно работать, смысла не вижу значек wifi проявить не удалось
-             sendCounter++;
           } else if(sendCounter==7){ 
+             ESP_MY_DEBUG(TAG,"Send net status 4");          
              sendMainState(wsOK_4); //этот статус вызывает отдачу первого блока данных
-             sendCounter++;
           } else if(sendCounter==8){ 
-             sendMainState(wsOK_5); // этот статус включает отдачу второго блока данных и периодическую показаний термодатчиков
-             sendCounter++;
+             if(mcu_vers!=3){
+             ESP_MY_DEBUG(TAG,"Send net status 5");          
+                sendMainState(wsOK_5); // этот статус включает отдачу второго блока данных и периодическую показаний термодатчиков для протокола 0
+             } else {
+                sendCounter++;
+             }
           } else if(sendCounter==9){ // остальной процессинг
-             if(new_target_temp_raw!=0xFF){  // нужно установить новую целевую температуру
-                setTargetTemp(new_target_temp_raw);
-                new_target_temp_raw=0xFF;
-             } else if(send_lock!=UNDEF){ // состояние LOCK изменилось
-                sendComm(LOCK, send_lock);
-                send_lock=UNDEF;
-             } else if(send_eco!=UNDEF){ // состояние режима ECO изменилось
-                sendComm(ECO, send_eco);
-                send_eco=UNDEF;
-             } else if(send_manual!=UNDEF){ // состояние режима AUTO изменилось
-                sendComm(POWER, ON);
-                sendComm(MANUAL, send_manual);
-                send_manual=UNDEF;
-             } else if(send_on!=UNDEF){ // состояние режима ON/OFF изменилось
-                sendComm(POWER, send_on);
-                send_on=UNDEF;
-             } else if(timer_plan_change && now-timer_plan_change>SET_PLAN_TIMEOUT*1000){ // изменилось расписание
-                timer_plan_change=0;
-                setShedule(&plan);
-                stateChanged();
-             } else if(now-lastSend>HEARTBEAT_INTERVAL*1000){
+             if(now-lastSend>SEND_TIMEOUT){
+                if(send_on==ON){ // состояние режима изменилось на ON, делаем в первую очередь
+                   sendComm(POWER, ON);
+                } 
+                if(new_target_temp_raw!=0xFF){  // нужно установить новую целевую температуру
+                   setTargetTemp(new_target_temp_raw);
+                }
+                if(send_lock!=UNDEF){ // состояние LOCK изменилось
+                   sendComm(LOCK, send_lock);
+                }   
+                if(send_eco!=UNDEF){ // состояние режима ECO изменилось
+                   sendComm(ECO, send_eco);
+                }
+                if(send_manual!=UNDEF){ // состояние режима AUTO изменилось
+                   if(_on!=ON){
+                      sendComm(POWER, ON);
+                   }
+                   sendComm(MANUAL, send_manual);
+                }
+                if(timer_plan_change && now-timer_plan_change>SET_PLAN_TIMEOUT*1000){ // изменилось расписание
+                   setShedule(&plan);
+                   stateChanged();
+                }
+                if(send_on==OFF){ // состояние режима ON/OFF изменилось на OFF
+                   sendComm(POWER, OFF);
+                }
+             }                
+             if(now-lastSend>HEARTBEAT_INTERVAL*1000){
+                ESP_MY_DEBUG(TAG,"Send regular PING");          
                 sendComm(PING);  
              }
           }
