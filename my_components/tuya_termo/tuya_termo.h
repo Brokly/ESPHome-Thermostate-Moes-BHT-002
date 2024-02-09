@@ -22,10 +22,8 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
-#define ESP_MY_DEBUG ESP_LOGE // для удобства отладки, могу переключить сообщения от компонента на любой уровень
-
-// раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
-//#define HOLMS 19
+#define ESP_MY_DEBUG ESP_LOGV // для удобства отладки, могу переключить сообщения от компонента на любой уровень
+//#define HOLMS 19  // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 
 namespace esphome {
 namespace tuya_termo {
@@ -55,12 +53,12 @@ using uart::UARTDevice;
 using uart::UARTComponent;
 
 // настройки таймаутов
-    const uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
-    const uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
-    const uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
-    const uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
-    const uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
-    const uint32_t NO_TEMP_RESTART_TIMEOUT = 20; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
+constexpr uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
+constexpr uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
+constexpr uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
+constexpr uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
+constexpr uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
+constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 20; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
 
 // типы запросов
 enum tCommand:uint8_t {PING=0,   //- периодический PING 
@@ -298,12 +296,12 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     uint8_t  in_reset_pin_state=0xAA;
     uint32_t reset_timer=0; // таймер ресета, задержка после получения сигнала 
     uint8_t mcu_vers=0; // версия MCU термостата, от этого зависит протокол
-
     // для обслуживания изменеия расписания
     sPeriods plan; // план работы в режиме авто
     uint32_t timer_plan_change=0; //флаг-таймер изменения плана работы из espHome
     uint8_t current_select_pos=0xFF; // текущий выбор в селекте
     bool plan_staff=false; // флаг поднимается во время переключения в селекте, для блокировки изменения данных
+    
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
        return float((int8_t)raw)/2;
@@ -538,7 +536,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        bool get_change=false;
        uint32_t now=esphome::millis();
        if (cByte == 0x66 && commandLength==8){ // температура выносного датчика 
-       // НОВЫЕ ВЕРСИИ ТЕРМОСТАТА МОГУТ НЕ ВЫДАВАТЬ ТЕМПЕРАТУРУ, ПАКЕТ ЕСТЬ, А В ПАКЕТЕ ЗНАЧЕНИЕ = 0, А ЭО ЗНАЧИТ, ЧТО ЕГО НЕТ
+       // НОВЫЕ ВЕРСИИ ТЕРМОСТАТА МОГУТ НЕ ВЫДАВАТЬ ТЕМПЕРАТУРУ, ПАКЕТ ЕСТЬ, А В ПАКЕТЕ ЗНАЧЕНИЕ = 0, А ЭТО ЗНАЧИТ, ЧТО ЕГО НЕТ
           ESP_MY_DEBUG(TAG,"Get External temperature %f",getTemp(receivedCommand[13]));
           dataTempTimer=now;
           if(curr_ext_temp_raw!=receivedCommand[13] && receivedCommand[13]!=0){ // температура изменилась 
@@ -866,15 +864,15 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
               }
            }               
         }
-        if(old_temp_action!=this->action || need_publish){ // бликуем при необходимости
-           ESP_MY_DEBUG(TAG,"State changed, %f, %f",this->current_temperature, temp);
+        if(old_temp_action!=this->action || need_publish){ // публикуем при необходимости
+           ESP_MY_DEBUG(TAG,"State changed, old:%f, new:%f",this->current_temperature, temp);
            this->publish_state();
         }
     }
 
     // вызывается пользователем из интерфейса ESPHome или Home Assistant
     void control(const esphome::climate::ClimateCall &call) override {
-        ESP_MY_DEBUG(TAG,"State changed from user.");
+        ESP_MY_DEBUG(TAG,"State changed from user");
         bool need_pub=false;
         // Проверка режима
         auto _mode=this->mode;
@@ -1193,7 +1191,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              }
           } else if(sendCounter==9){ // остальной процессинг
              if(now-lastSend>SEND_TIMEOUT){
-                if(send_on==ON){ // состояние режима изменилось на ON, делаем в первую очередь
+                if(send_on==ON || (_on!=ON && (send_manual!=UNDEF || send_eco!=UNDEF))){ // состояние режима изменилось на ON, делаем в первую очередь
                    sendComm(POWER, ON);
                 } 
                 if(new_target_temp_raw!=0xFF){  // нужно установить новую целевую температуру
@@ -1206,9 +1204,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
                    sendComm(ECO, send_eco);
                 }
                 if(send_manual!=UNDEF){ // состояние режима AUTO изменилось
-                   if(_on!=ON){
-                      sendComm(POWER, ON);
-                   }
                    sendComm(MANUAL, send_manual);
                 }
                 if(timer_plan_change && now-timer_plan_change>SET_PLAN_TIMEOUT*1000){ // изменилось расписание
