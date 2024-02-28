@@ -22,7 +22,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
-#define ESP_MY_DEBUG ESP_LOGV // для удобства отладки, могу переключить сообщения от компонента на любой уровень
+#define ESP_MY_DEBUG ESP_LOGD // для удобства отладки, могу переключить сообщения от компонента на любой уровень
 //#define HOLMS 19  // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 
 namespace esphome {
