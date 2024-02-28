@@ -1072,7 +1072,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              in_reset_pin_state=val;
              reset_timer=now;
            } else if(now-reset_timer>2000){ // изменение сигнала было больше 2 сек назад
-              ESP_LOGV(TAG,"Get inbound RESET, restart protocol interchange");
+              ESP_LOGD(TAG,"Get inbound RESET, restart protocol interchange");
               reset_timer=0;
               sendCounter=1; // начать крутить шарманку опроса с начала
            }
@@ -1080,7 +1080,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
         static uint32_t cycle_reset_timer=0;
         if (now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000){ // каждые 20 минут опрашиваем MCU c нуля
-           ESP_LOGV(TAG,"Cuclic auto restart protocol interchange");
+           ESP_LOGD(TAG,"Cuclic auto restart protocol interchange");
            cycle_reset_timer=now;
            sendCounter=1; // начать крутить шарманку опроса с начала
         }
