@@ -198,7 +198,7 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
        //... 
     //};
     void control(const LockCall &call) override {
-       ESP_LOGV(TAG,"LOCK CONTROL !!!");   
+       ESP_LOGD(TAG,"LOCK CONTROL !!!");   
     }
  friend class TuyaTermo;   
 };
@@ -375,7 +375,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
     // публикация текущего режима работы климата
     void check_action(){
-        ESP_LOGV(TAG, "Current state publicate - not released");
+        ESP_LOGD(TAG, "Current state publicate - not released");
     }
 
     // получить текст из буфера данных
@@ -501,14 +501,14 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // отправка целевой температуры
     void setTargetTemp(uint8_t temp){
-       ESP_LOGV(TAG,"Send target temperature: %f",getTemp(temp));
+       ESP_LOGD(TAG,"Send target temperature: %f",getTemp(temp));
        uint8_t setTemp[]={0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, temp};
        sendCommand(0x06,sizeof(setTemp), setTemp);   
     }
 
 // отправка данных о расписании
     void setShedule(sPeriods* shedule){
-       ESP_LOGV(TAG,"Send AUTO plan");
+       ESP_LOGD(TAG,"Send AUTO plan");
        uint8_t setShed[58]={0x65, 0x00, 0x00, 0x36};
        memcpy(setShed+4,shedule,sizeof(sPeriods));
        sendCommand(0x06,sizeof(setShed), setShed);
