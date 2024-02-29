@@ -57,12 +57,12 @@ using uart::UARTDevice;
 using uart::UARTComponent;
 
 // настройки таймаутов
-constexpr uint32_t HEARTBEAT_INTERVAL = 15; // переодичность передачи сигнала активности процессору термостата (Sec)
+constexpr uint32_t HEARTBEAT_INTERVAL = 10; // переодичность передачи сигнала активности процессору термостата (Sec)
 constexpr uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
 constexpr uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
 constexpr uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
 constexpr uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
-constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 60; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
+constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 120; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
 
 // типы запросов
 enum tCommand:uint8_t {PING=0,   //- периодический PING 
@@ -701,6 +701,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
          case 0x03: { //55 aa 01(03) 03 00 00 CS,  Report the network status of the device
            ESP_MY_DEBUG(TAG,"Get Confirm Network reply");
            knownCommand = true;
+           dataTempTimer= esphome::millis(); // таймер отсутствия полезных данныых
            if(sendCounter>=5 && sendCounter<=8){ // пришел ответ на команду, переходим дальше
               sendCounter++;
            }
@@ -1143,9 +1144,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         }
 
         static uint32_t cycle_reset_timer=0;
-        if ((now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000) || 
-                        (now-dataTempTimer> NO_TEMP_RESTART_TIMEOUT*1000)){ // каждые XX минут опрашиваем MCU c нуля или по таймауту если долго не получаем температуру
-           ESP_MY_DEBUG(TAG,"Cuclic auto restart protocol interchange");
+        if (/*(now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000) || */
+                        (now-dataTempTimer>NO_TEMP_RESTART_TIMEOUT*1000)){ // каждые XX минут опрашиваем MCU c нуля или по таймауту если долго не получаем температуру
+           ESP_MY_DEBUG(TAG,"Cyclic auto restart protocol interchange");
            cycle_reset_timer=now;
            dataTempTimer=now;
            sendCounter=1; // начать крутить шарманку опроса с начала
