@@ -27,7 +27,7 @@
 
 // Tested devices
 //IAYz2WK1th0cMLmL1.0.0 - proto 1
-//"p":"4jdveazecxcrdbgq","v":"1.0.0","m":2,"mt":2562 -proto 3
+//"p":"4jdveazecxcrdbgq","v":"1.0.0","m":2,"mt":2562 -  3
 
 namespace esphome {
 namespace tuya_termo {
@@ -325,8 +325,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         va_end(vl);
     }
 
-    //void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0) {
-    void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_ERROR, unsigned int line = 0) {
+    void _debugPrintPacket(uint8_t *packet, uint8_t length, bool dirrect=true, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0) {
         String st = "";
         char textBuf[11];
 
@@ -443,7 +442,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           memcpy(controll_buffer+6, data, length); // сохраняем данные для лога
           _tuya_serial->write_array(&chkSum,1); // отправляем КС
           controll_buffer[length+6]=chkSum;
-          _debugPrintPacket(controll_buffer, length+6+1);          
+          //_debugPrintPacket(controll_buffer, length+6+1);          
           lastSend=esphome::millis(); //время отправки последнего байта
           sendRight=false; // обязательно дождаться таймаута
           waitReply=comm; // запоминаем команду которую отправили
@@ -740,7 +739,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // РАЗБОР КОМАНДЫ ПОСЛЕ ПРОВЕРКИ СТРУКТУРЫ
     void processSerialCommand() {
-       _debugPrintPacket(receivedCommand, receiveIndex+1, false);
+       //_debugPrintPacket(receivedCommand, receiveIndex+1, false);
        if (commandLength > -1) {
           bool knownCommand = false;
           proto_vers=receivedCommand[2]; // запоминаем версию протокола MCU термостата
