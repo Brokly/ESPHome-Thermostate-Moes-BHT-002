@@ -25,6 +25,10 @@
 #define ESP_MY_DEBUG ESP_LOGD // для удобства отладки, могу переключить сообщения от компонента на любой уровень
 //#define HOLMS 19  // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 
+// Tested devices
+//IAYz2WK1th0cMLmL1.0.0 - proto 1
+//"p":"4jdveazecxcrdbgq","v":"1.0.0","m":2,"mt":2562 -proto 3
+
 namespace esphome {
 namespace tuya_termo {
 
@@ -80,11 +84,13 @@ enum tMode:uint16_t {POWER=0x0101,  //- включение/выключение
 enum tStat:uint8_t {OFF=0, ON=1, UNDEF=0xFF};
 
 // типы инфы о состоянии связи
-enum tMainState:uint8_t {wsOFF=1,   //- устройство не имеет настроек WIFI
-                         wsPROC=2,  //- устройство имеет настройки wifi, но не подключено
-                         wsOK=3,    //- успешно подключено и нужен первый набор данных
-                         wsOK_4=4,  //- нужен второй набор данных
-                         wsOK_5=5
+enum tMainState:uint8_t {wsPair=0,      // SmartConfig pairing status
+                         wsNoConf=1,    // AP pairing status - устройство не имеет настроек WIFI
+                         wsWifiConf=2,  // Wi-Fi has been configured, but not connected to the router - устройство имеет настройки wifi, но не подключено
+                         wsWifi=3,      // Wi-Fi has been configured, and connected to the router - успешно подключено и нужен первый набор данных
+                         wsWifiCloud=4, // Wi-Fi has been connected to the router and the cloud - нужен второй набор данных
+                         wsLowPow=5,    // Wi-Fi device is in the low power consumption mode
+                         wsAPSmart=6    // Both SmartConfig and AP pairing status are available
 };
 
 class TuyaTermo;
@@ -295,7 +301,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     GPIOPin* in_reset_pin{nullptr};
     uint8_t  in_reset_pin_state=0xAA;
     uint32_t reset_timer=0; // таймер ресета, задержка после получения сигнала 
-    uint8_t mcu_vers=0; // версия MCU термостата, от этого зависит протокол
+    uint8_t proto_vers=0; // версия MCU термостата, от этого зависит протокол
     // для обслуживания изменеия расписания
     sPeriods plan; // план работы в режиме авто
     uint32_t timer_plan_change=0; //флаг-таймер изменения плана работы из espHome
@@ -479,22 +485,26 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // отправка времени термостату
     void setDeviceTime() {
-       uint8_t dateTime[]={0x01, 0, 0, 0, 0, 0, 0, 0};
+       //uint8_t dateTime[]={0x01, 0, 0, 0, 0, 0, 0, 0};
+       uint8_t dateTime[]={0, 0, 0, 0, 0, 0, 0, 0};
        if(time_!=nullptr){
           auto now = time_->now(); // в устройство льем время в соответствии с временной зоной
           if (!now.is_valid()) {
              ESP_LOGE(TAG,"System time not syncing !");
          } else {
+             //ESP_MY_DEBUG(TAG,"Time from server %u:%02u:%02u %u/%02u/%04u (dw:%u)",now.hour,now.minute,now.second,now.day_of_month,now.month,now.year,now.day_of_week);
              now.recalc_timestamp_utc(true);  // calculate timestamp of local time
-             const uint8_t day_core[]={0,7,1,2,3,4,5,6}; // счет 1..7, у нас воскр-7, у них воскр-1
+             dateTime[0]=0x01; //report the local time (date format), 0x02: report the Greenwich Mean Time (GMT, date format), 0x03: time data bit timestamp, precision to seconds
              dateTime[1]=now.year%100;
              dateTime[2]=now.month;
              dateTime[3]=now.day_of_month;
              dateTime[4]=now.hour;
              dateTime[5]=now.minute;
              dateTime[6]=now.second;
-             dateTime[7]=day_core[now.day_of_week];
-             ESP_MY_DEBUG(TAG,"Send time");
+             //const uint8_t day_core[]={0,7,1,2,3,4,5,6}; // счет 1..7, у нас воскр-7, у них воскр-1
+             //dateTime[7]=day_core[now.day_of_week];
+             dateTime[7]=(now.day_of_week+5)%7+1;
+             ESP_MY_DEBUG(TAG,"Send time %u:%02u:%02u %u/%02u/%02u (dw:%u)",dateTime[4],dateTime[5],dateTime[6],dateTime[3],dateTime[2],dateTime[1],dateTime[7]);
          }
        }           
        sendCommand(0x1C, sizeof(dateTime), dateTime);
@@ -669,7 +679,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }
            break;
          }
-         case 0x01: { // идентификатор изделия
+         case 0x01: { // идентификатор изделия Query product information
            String id=getStringFromBuff((uint8_t*)receivedCommand+6,length);
            ESP_MY_DEBUG(TAG,"Get Product info: %s", id.c_str());
            if(sensor_mcu_id_!=nullptr){
@@ -681,15 +691,15 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }
            break;
          }
-         case 0x02: { //0x55 0xAA  0x01(03)  0x02  0x00  0x00  CS , ПОХОЖЕ НА РЕСЕТ ПРОВЕРИТЬ ДЛИННОЕ НАЖАТИЕ
+         case 0x02: { //0x55 0xAA  0x01(03)  0x02  0x00  0x00  CS  Query working mode of the module set by MCU
            ESP_MY_DEBUG(TAG,"Get Confirm reply");
-           if (receivedCommand[5] == 0x00) { // у большинства термостатов это означает , что необходимо запростить данные
+           if (receivedCommand[5] == 0x00) { 
              sendCounter=4; // переход к передаче статуса wifi
              knownCommand = true;
            }
            break;
          }
-         case 0x03: { //55 aa 01(03) 03 00 00 CS,  ОТВЕТ ТЕРМОСТАТА НА ИНФОРМИРОВАНИЕ О СТАТУСЕ WIFI 
+         case 0x03: { //55 aa 01(03) 03 00 00 CS,  Report the network status of the device
            ESP_MY_DEBUG(TAG,"Get Confirm Network reply");
            knownCommand = true;
            if(sendCounter>=5 && sendCounter<=8){ // пришел ответ на команду, переходим дальше
@@ -697,31 +707,33 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }
            break;
          }
-         case 0x04: { //55 aa 01(03) 04 00 00 CS, ВОЗМОЖНО СИГНАЛ О НЕОБХОДИМОСТИ СБРОСА НАСТРОЙКИ
+         case 0x04: { //55 aa 01(03) 04 00 00 CS Reset Wi-Fi
            ESP_MY_DEBUG(TAG,"Get Setting reset");
            sendComm(REPRES); // отвечаем что приняли ресет
            sendCounter=1; // запускаем карусель
            knownCommand = true;
            break;
          }
-         case 0x05: {  // ресет - мигает экран
-           //55 aa 01(03) 05 00 00
+         case 0x05: {  //55 aa 01(03) 05 00 00 Reset Wi-Fi and select the pairing mode  //ресет - мигает экран
            ESP_MY_DEBUG(TAG,"Get Net setting mode");
            knownCommand = true;
            break;
          }
-         case 0x1C: {  //55 aa 01(03) 1c 00 00 1c запрос времени
+         case 0x1C: {  //55 aa 01(03) 1c 00 00 1c запрос времени (в протоколе ТУИ это другая команда (WTF) ???)
            ESP_MY_DEBUG(TAG,"Get Date/time request");
            knownCommand = true;
            setDeviceTime(); // отвечаем временем
            break;
          }
-         case 0x2B: {  //55;AA;03;2B;00;00;2D
-           ESP_MY_DEBUG(TAG,"Get Unexpect request");
+         case 0x2B: {  //55;AA;03;2B;00;00;2D Get the MAC address of the module
+           ESP_MY_DEBUG(TAG,"Get Unexpect request 0x2B");
            knownCommand = true;
            setBlabla();
            break;
          }
+         default:
+           ESP_LOGE(TAG,"Get Unexpect request 0x%X",commandByte);
+           break;
        }
        return knownCommand;
      }
@@ -731,7 +743,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        _debugPrintPacket(receivedCommand, receiveIndex+1, false);
        if (commandLength > -1) {
           bool knownCommand = false;
-          mcu_vers=receivedCommand[2]; // запоминаем версию протокола MCU термостата
+          proto_vers=receivedCommand[2]; // запоминаем версию протокола MCU термостата
           if (receivedCommand[3] == 0x07) { // пакет о статусе
             knownCommand = processStatusCommand(receivedCommand[6], receivedCommand[5]);
           } else { // служебный пакет
@@ -799,8 +811,10 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         auto now = time_->now(); // текущее время
         if((manualMode==(uint8_t)OFF || this->mode==climate::CLIMATE_MODE_AUTO) && now.is_valid()){ // режим работы по расписанию и есть правильное текущее время
            now.recalc_timestamp_utc(true);  // получить локальное время
-           const uint8_t day_core[]={0,7,1,2,3,4,5,6}; // счет 1..7, у нас воскр-7, у них воскр-1
-           temp_dest=plan.get_plan_current_temp_raw(day_core[now.day_of_week], now.hour, now.minute);
+           //const uint8_t day_core[]={0,7,1,2,3,4,5,6}; // счет 1..7, у нас воскр-7, у них воскр-1
+           //temp_dest=plan.get_plan_current_temp_raw(day_core[now.day_of_week], now.hour, now.minute);
+           temp_dest=plan.get_plan_current_temp_raw((now.day_of_week+7)%7+1, now.hour, now.minute);
+           
         } else { // ручной режим
            temp_dest=target_temp_raw;   
         }
@@ -1175,20 +1189,27 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              sendComm(DATA);
           } else if(sendCounter==5){
              ESP_MY_DEBUG(TAG,"Send net status 0");          
-             sendMainState(wsPROC);  // непоянтно зачем это и как должно работать, смысла не вижу значек wifi проявить не удалось
+             sendMainState(wsWifiConf);  // непоянтно зачем это и как должно работать, смысла не вижу значек wifi проявить не удалось
           } else if(sendCounter==6){ 
              ESP_MY_DEBUG(TAG,"Send net status OK");          
-             sendMainState(wsOK); // непоянтно зачем это и как должно работать, смысла не вижу значек wifi проявить не удалось
+             sendMainState(wsWifi); // если не передать этот статус, то MCU считает что нет подключения и не считает время 
+             if(proto_vers<3){ // при протоколе младше третьего статусов старше нет
+                sendCounter=9;
+             }
           } else if(sendCounter==7){ 
              ESP_MY_DEBUG(TAG,"Send net status 4");          
-             sendMainState(wsOK_4); //этот статус вызывает отдачу первого блока данных
-          } else if(sendCounter==8){ 
-             if(mcu_vers!=3){
-             ESP_MY_DEBUG(TAG,"Send net status 5");          
-                sendMainState(wsOK_5); // этот статус включает отдачу второго блока данных и периодическую показаний термодатчиков для протокола 0
+             sendMainState(wsWifiCloud); //этот статус вызывает отдачу первого блока данных
+             sendCounter=9;
+          } else if(sendCounter==8){ // Temporaly
+             sendCounter=9;
+             /*
+             if(proto_vers!=3){
+                ESP_MY_DEBUG(TAG,"Send net status 5");          
+                sendMainState(wsLowPow); // этот статус включает отдачу второго блока данных и периодическую показаний термодатчиков для протокола 0
              } else {
                 sendCounter++;
              }
+             */
           } else if(sendCounter==9){ // остальной процессинг
              if(now-lastSend>SEND_TIMEOUT){
                 if(send_on==ON || (_on!=ON && (send_manual!=UNDEF || send_eco!=UNDEF))){ // состояние режима изменилось на ON, делаем в первую очередь
