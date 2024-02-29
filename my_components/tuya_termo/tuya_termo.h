@@ -62,7 +62,7 @@ constexpr uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), 
 constexpr uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
 constexpr uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
 constexpr uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
-constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 20; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
+constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 60; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
 
 // типы запросов
 enum tCommand:uint8_t {PING=0,   //- периодический PING 
