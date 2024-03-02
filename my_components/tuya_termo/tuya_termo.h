@@ -341,6 +341,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     // отправленный статус связи
     uint8_t oldNetState=wsPair;
     uint8_t netState=0xFF;
+    uint32_t netSendTimer=0;
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
        return float((int8_t)raw)/2;
@@ -524,7 +525,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 //отправка инфо о статусе модуля связи, это влияет на отдачу данных в модуль связи
     void sendNetState(uint8_t status=wsWifiConf) {
-       ESP_MY_DEBUG(TAG,"Send main status: %u", status);
+       ESP_MY_DEBUG(TAG,"Send main net status: %u", status);
        sendCommand(NETSTAT, 1, &status);
     }
 
@@ -557,6 +558,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
              //dateTime[7]=day_core[now.day_of_week];
              dateTime[7]=(now.day_of_week+5)%7+1;
              ESP_MY_DEBUG(TAG,"Send time %u:%02u:%02u %u/%02u/%02u (dw:%u)",dateTime[4],dateTime[5],dateTime[6],dateTime[3],dateTime[2],dateTime[1],dateTime[7]);
+             netSendTimer=esphome::millis();
          }
        }           
        sendCommand(0x1C, sizeof(dateTime), dateTime);
@@ -1271,6 +1273,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            }
         }
         
+
         // карусель обмена данными
         if(now-lastSend>UART_TIMEOUT && (now-lastRead>UART_TIMEOUT || sendRight)){ //можно отправлять
           sendRight=false;
@@ -1290,12 +1293,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           } else if(sendCounter==5){ // отправка стартового сетевого состояния
              sendNetState(oldNetState);  
              sendCounter++;
+             netSendTimer=now;
           } else if(sendCounter==6){ // остальной процессинг
-             netState=getNetState(); // запрос текущего состояния сети
-             if(oldNetState!=netState){
-                ESP_MY_DEBUG(TAG,"New Net State: %u", netState);
+             if(now-netSendTimer>=1000){ // тики таймера
+                netState=getNetState(); // запрос текущего состояния сети
                 sendNetState(netState);
+                netSendTimer+=1000;
              }
+             //if(oldNetState!=netState){
+             //   ESP_MY_DEBUG(TAG,"New Net State: %u", netState);
+             //   sendNetState(netState);
+             //}
              if(now-lastSend>SEND_TIMEOUT){
                 if(send_on==ON || (_on!=ON && (send_manual!=UNDEF || send_eco!=UNDEF))){ // состояние режима изменилось на ON, делаем в первую очередь
                    sendComm(POWER, ON);
@@ -1320,9 +1328,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
                    sendComm(POWER, OFF);
                 }
              }                
-             if(now-lastSend>HEARTBEAT_INTERVAL*1000){
+             static uint32_t lastSendPing=now;
+             if(now-lastSendPing>HEARTBEAT_INTERVAL*1000){
                 ESP_MY_DEBUG(TAG,"Send regular PING");          
-                sendComm(PING);  
+                sendComm(PING);
+                lastSendPing+=HEARTBEAT_INTERVAL*1000;
              }
           }
         }
