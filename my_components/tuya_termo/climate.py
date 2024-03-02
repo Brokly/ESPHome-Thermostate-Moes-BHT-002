@@ -60,6 +60,7 @@ CONF_ECO_TEMPERATURE= 'eco_temperature'
 CONF_OVERHEAT_TEMPERATURE= 'overheat_temperature'
 CONF_DEADZONE_TEMPERATURE= 'deadzone_temperature'
 CONF_INPUT_RESET_PIN= 'input_reset_pin'
+CONF_MODE_RESTORE= 'mode_restore'
 
 tuya_termo_ns = cg.esphome_ns.namespace("tuya_termo")
 TuyaTermo = tuya_termo_ns.class_("TuyaTermo", climate.Climate, cg.Component)
@@ -129,6 +130,7 @@ CONFIG_SCHEMA = cv.All(
                 device_class=DEVICE_CLASS_TEMPERATURE,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+            cv.Optional(CONF_MODE_RESTORE, default=False): cv.boolean,
             cv.Optional(CONF_SUPPORTED_MODES): cv.ensure_list(validate_modes),
             cv.Optional(CONF_SUPPORTED_PRESETS): cv.ensure_list(validate_presets),
             cv.Optional(CONF_CHILDREN_LOCK): switch.switch_schema(
@@ -237,6 +239,8 @@ async def to_code(config):
     if CONF_INPUT_RESET_PIN in visual:
         pin = await cg.CONF_INPUT_RESET_PIN(config[CONF_INPUT_RESET_PIN])
         cg.add(var.set_input_reset_pin(pin))
+    if CONF_MODE_RESTORE in config:
+        cg.add(var.set_mode_restore(config[CONF_MODE_RESTORE]))
 
     if CONF_SHEDULE_HOURS in config:
         check_plan = 1
