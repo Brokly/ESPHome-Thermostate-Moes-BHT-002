@@ -30,6 +30,9 @@ from esphome.const import (
     CONF_MIN_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
     CONF_VISUAL,
+    CONF_HOURS,
+    CONF_MINUTES,
+    CONF_TEMPERATURE,
 )
 
 from esphome.components.climate import (
@@ -47,13 +50,16 @@ CONF_INTERNAL_TEMPERATURE = 'internal_temperature'
 CONF_EXTERNAL_TEMPERATURE = 'external_temperature'
 CONF_CHILDREN_LOCK = 'children_lock'
 ICON_CHILDREN_LOCK = 'mdi:lock'
-CONF_SHEDULE_HOURS = 'shedule_hours'
+
+CONF_SHEDULE = 'shedule'
+CONF_SHEDULE_HOURS = CONF_HOURS
 ICON_SHEDULE_HOURS = 'mdi:timer-play'
-CONF_SHEDULE_MINUTES = 'shedule_minutes'
+CONF_SHEDULE_MINUTES = CONF_MINUTES
 ICON_SHEDULE_MINUTES = 'mdi:timer-play-outline'
-CONF_SHEDULE_TEMPERATURE = 'shedule_temperature'
-CONF_SHEDULE_SELECTOR = 'shedule_selector'
+CONF_SHEDULE_TEMPERATURE = CONF_TEMPERATURE
+CONF_SHEDULE_SELECTOR = 'selector'
 ICON_SHEDULE_SELECTOR = 'mdi:calendar-clock'
+
 CONF_PRODUCT_ID = 'product_id'
 ICON_PRODUCT_ID = 'mdi:cog'
 CONF_ECO_TEMPERATURE= 'eco_temperature'
@@ -61,6 +67,8 @@ CONF_OVERHEAT_TEMPERATURE= 'overheat_temperature'
 CONF_DEADZONE_TEMPERATURE= 'deadzone_temperature'
 CONF_INPUT_RESET_PIN= 'input_reset_pin'
 CONF_MODE_RESTORE= 'mode_restore'
+CONF_MCU_RESET_PIN= 'mcu_reset_pin'
+
 
 tuya_termo_ns = cg.esphome_ns.namespace("tuya_termo")
 TuyaTermo = tuya_termo_ns.class_("TuyaTermo", climate.Climate, cg.Component)
@@ -68,7 +76,7 @@ TuyaTermo_Switch = tuya_termo_ns.class_("TuyaTermo_Switch", switch.Switch, cg.Co
 TuyaTermo_Number = tuya_termo_ns.class_("TuyaTermo_Number", number.Number, cg.Component)
 TuyaTermo_Select = tuya_termo_ns.class_("TuyaTermo_Select", select.Select, cg.Component)
 #TuyaTermo_Lock = tuya_termo_ns.class_("TuyaTermo_Lock", lock.Lock, cg.Component)
-check_plan = 0
+#check_plan = 0
 
 ALLOWED_CLIMATE_MODES = {
     "AUTO": ClimateMode.CLIMATE_MODE_AUTO,
@@ -80,6 +88,19 @@ ALLOWED_CLIMATE_PRESETS = {
     "ECO": ClimatePreset.CLIMATE_PRESET_ECO,
 }
 validate_presets = cv.enum(ALLOWED_CLIMATE_PRESETS, upper=True)
+
+def validate_pins(config):
+    if CONF_INPUT_RESET_PIN in config and CONF_MCU_RESET_PIN in config:
+        raise cv.Invalid(f"Options 'mcu_reset_pin' and 'input_reset_pin' cannot be used simultaneously.")
+    return config
+
+def validate_plan(config):
+    if CONF_SHEDULE in config:
+       shedule = config[CONF_SHEDULE]
+       if CONF_SHEDULE in config or CONF_SHEDULE_SELECTOR in shedule or CONF_SHEDULE_TEMPERATURE in shedule or CONF_SHEDULE_MINUTES in shedule or CONF_SHEDULE_HOURS in shedule:
+           if CONF_SHEDULE_SELECTOR not in shedule or CONF_SHEDULE_TEMPERATURE not in shedule or CONF_SHEDULE_MINUTES not in shedule or CONF_SHEDULE_HOURS not in shedule:
+              raise cv.Invalid(f"Section 'shedule' must have options 'selector', 'hours', 'minutes' and 'temperature'.")
+    return config
 
 NumberMode = tuya_termo_ns.enum("NumberMode")
 
@@ -110,11 +131,43 @@ CONFIG_SCHEMA = cv.All(
                 cv.Optional(CONF_DEADZONE_TEMPERATURE, default=1.0): cv.float_range(
                     min=1.0, max=5.0
                 ),
-                # нога нажатия на сенсор
-                cv.Optional(CONF_INPUT_RESET_PIN ): pins.gpio_input_pin_schema,
               }
             ),
+            cv.Optional(CONF_SHEDULE, default={}): cv.Schema(
+              {
+                cv.Optional(CONF_SHEDULE_SELECTOR): select.SELECT_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                  {
+                     cv.GenerateID(): cv.declare_id(TuyaTermo_Select),
+                     cv.Optional(CONF_ICON, default=ICON_SHEDULE_SELECTOR): cv.icon,
+                  },
+                ),
+                cv.Optional(CONF_SHEDULE_HOURS): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                  {
+                     cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+                     cv.Optional(CONF_ICON, default=ICON_SHEDULE_HOURS): cv.icon,
+                     cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
+                  },
+                ),
+                cv.Optional(CONF_SHEDULE_MINUTES): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                  {
+                     cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+                     cv.Optional(CONF_ICON, default=ICON_SHEDULE_MINUTES): cv.icon,
+                     cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
+                  },
+                ),
+                cv.Optional(CONF_SHEDULE_TEMPERATURE): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                  {
+                     cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+                     cv.Optional(CONF_ICON, default=ICON_THERMOMETER): cv.icon,
+                  },
+                ),
+              }            
+            ), 
 
+            # нога входного сигнала сброса
+            cv.Optional(CONF_INPUT_RESET_PIN ): pins.gpio_input_pin_schema,
+            # нога ресета MCU термостата
+            cv.Optional(CONF_MCU_RESET_PIN ): pins.gpio_input_pin_schema,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_INTERNAL_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
@@ -140,44 +193,45 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PRODUCT_ID): text_sensor.text_sensor_schema(
                icon=ICON_PRODUCT_ID,
             ),
-            cv.Optional(CONF_SHEDULE_HOURS): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-               {
-                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_HOURS): cv.icon,
-                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
-               },
-            ),
-            cv.Optional(CONF_SHEDULE_MINUTES): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-               {
-                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_MINUTES): cv.icon,
-                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
-               },
-            ),
-            cv.Optional(CONF_SHEDULE_TEMPERATURE): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-               {
-                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-                   cv.Optional(CONF_ICON, default=ICON_THERMOMETER): cv.icon,
-               },
-            ),
-            cv.Optional(CONF_SHEDULE_SELECTOR): select.SELECT_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-               {
-                   cv.GenerateID(): cv.declare_id(TuyaTermo_Select),
-                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_SELECTOR): cv.icon,
-               },
-            ),
+
+#            cv.Optional(CONF_SHEDULE_HOURS): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+#               {
+#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_HOURS): cv.icon,
+#                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
+#               },
+#            ),
+#            cv.Optional(CONF_SHEDULE_MINUTES): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+#               {
+#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_MINUTES): cv.icon,
+#                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
+#               },
+#            ),
+#            cv.Optional(CONF_SHEDULE_TEMPERATURE): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+#               {
+#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
+#                   cv.Optional(CONF_ICON, default=ICON_THERMOMETER): cv.icon,
+#               },
+#            ),
+#            cv.Optional(CONF_SHEDULE_SELECTOR): select.SELECT_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+#               {
+#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Select),
+#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_SELECTOR): cv.icon,
+#               },
+#            ),
             #cv.Optional(CONF_CHILDREN_LOCK): lock.LOCK_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
             #   {
             #       cv.GenerateID(): cv.declare_id(TuyaTermo_Lock),
             #   },
             #),
-
-
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA),
-    output_info
+    output_info,
+    validate_pins,
+    validate_plan,
 )
 
 async def to_code(config):
@@ -236,51 +290,35 @@ async def to_code(config):
         cg.add(var.set_visual_temperature_overheat(visual[CONF_OVERHEAT_TEMPERATURE]))
     if CONF_DEADZONE_TEMPERATURE in visual:
         cg.add(var.set_visual_temperature_deadzone(visual[CONF_DEADZONE_TEMPERATURE]))
-    if CONF_INPUT_RESET_PIN in visual:
-        pin = await cg.CONF_INPUT_RESET_PIN(config[CONF_INPUT_RESET_PIN])
+    
+    if CONF_INPUT_RESET_PIN in config:
+        pin = await cg.gpio_pin_expression(config[CONF_INPUT_RESET_PIN])
         cg.add(var.set_input_reset_pin(pin))
+    
+    if CONF_MCU_RESET_PIN in config:
+        pin = await cg.gpio_pin_expression(config[CONF_MCU_RESET_PIN])
+        cg.add(var.set_mcu_reset_pin(pin))
+
     if CONF_MODE_RESTORE in config:
         cg.add(var.set_mode_restore(config[CONF_MODE_RESTORE]))
 
-    if CONF_SHEDULE_HOURS in config:
-        check_plan = 1
-    if CONF_SHEDULE_MINUTES in config:
-        if check_plan == 1:
-           check_plan = 2
-        else:
-           check_plan == 1
-    if CONF_SHEDULE_TEMPERATURE in config:
-        if check_plan == 2:
-           check_plan = 3
-        else:
-           check_plan == 1
-    if CONF_SHEDULE_SELECTOR in config:
-        if check_plan == 3:
-           check_plan = 4
-        else:
-           check_plan == 1
-
-    if check_plan == 4 :
-        conf = config[CONF_SHEDULE_HOURS]
-        numb = await number.new_number(conf, min_value=0, max_value=23, step=1)
-        cg.add(var.set_hours_number(numb))
-
-        conf = config[CONF_SHEDULE_MINUTES]
-        numb = await number.new_number(conf, min_value=0, max_value=59, step=1)
-        cg.add(var.set_minutes_number(numb))
-
-        conf = config[CONF_SHEDULE_TEMPERATURE]
-        #numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_STEP])
-        numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=0.5)
-        cg.add(var.set_temperatures_number(numb))
-
-        conf = config[CONF_SHEDULE_SELECTOR]
-        sel = await select.new_select(conf, options=[])
-        cg.add(var.set_plan_select(sel))
-     
-    else:
-        if check_plan > 0:
-           raise cv.Invalid(
-                f"To be used in AUTO mode, the parameters 'shedule_hours', 'shedule_minutes', 'shedule_temperature' and 'shedule_selector' must be set."
-           )
+    if CONF_SHEDULE in config:
+        shed = config[CONF_SHEDULE]
+        if CONF_SHEDULE_HOURS in shed:
+            conf = shed[CONF_SHEDULE_HOURS]
+            numb = await number.new_number(conf, min_value=0, max_value=23, step=1)
+            cg.add(var.set_hours_number(numb))
+        if CONF_SHEDULE_MINUTES in shed:
+            conf = shed[CONF_SHEDULE_MINUTES]
+            numb = await number.new_number(conf, min_value=0, max_value=59, step=1)
+            cg.add(var.set_minutes_number(numb))
+        if CONF_SHEDULE_TEMPERATURE in shed:
+            conf = shed[CONF_SHEDULE_TEMPERATURE]
+            #numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_STEP])
+            numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=0.5)
+            cg.add(var.set_temperatures_number(numb))
+        if CONF_SHEDULE_SELECTOR in shed:
+            conf = shed[CONF_SHEDULE_SELECTOR]
+            sel = await select.new_select(conf, options=[])
+            cg.add(var.set_plan_select(sel))
 

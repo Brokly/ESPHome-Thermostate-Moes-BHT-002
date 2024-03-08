@@ -82,7 +82,7 @@ constexpr uint32_t HEARTBEAT_INTERVAL = 10; // переодичность пер
 constexpr uint32_t UART_TIMEOUT = 200; //время ожидания uart (uS), пока это время не истечет после приема или отправки - ждем
 constexpr uint32_t SEND_TIMEOUT = 1; //время ожидания между сеансами отправки данных (uS)
 constexpr uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки отправки расписания в (Sec), после изменения в интерфейсе
-constexpr uint32_t PROTO_RESTART_UNTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
+//constexpr uint32_t PROTO_RESTART_INTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
 constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 120; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
 constexpr uint32_t STORE_PERIOD = 10; // период тестирования и при необходимости сохранения данных для восстановления режима работы после перезагрузки (Sec) 
 
@@ -332,6 +332,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     TuyaTermo_Select* plan_select=nullptr; 
     // чилдрен лок
     //TuyaTermo_Lock* child_lock=nullptr;
+    // нога перезагрузки MCU, этой ногой будем ресетить MCU
+    GPIOPin* mcu_reset_pin_{nullptr};    
     // нога контроля сигнала ресет протокол от MCU
     GPIOPin* in_reset_pin{nullptr};
     uint8_t  in_reset_pin_state=0xAA;
@@ -733,15 +735,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        bool knownCommand = false;
        switch (commandByte) {
          case PING: {
-           switch (receivedCommand[6]) {
-             case OFF : //55 aa 01(03) 00 00 01 00: first heartbeat
-                ESP_MY_DEBUG(TAG,"Get First heartbeat");
-                knownCommand = true;
-                break;
-             case ON : //55 aa 01(03) 00 00 01 01: every heartbeat after
-                ESP_MY_DEBUG(TAG,"Get Every heartbeat after %d sec",esphome::millis()/1000);
-                knownCommand = true;
-                break;
+           if(receivedCommand[6]==OFF){
+              ESP_MY_DEBUG(TAG,"Get first reply PING");
+              knownCommand = true;
+           } else if(receivedCommand[6]==ON){
+              ESP_MY_DEBUG(TAG,"Get every reply PING after %d sec",esphome::millis()/1000);
+              knownCommand = true;
+           } else if(receivedCommand[6]==ON){
+               ESP_LOGE(TAG,"Get reply PING: %d - ERROR !!!", receivedCommand[6]);
+           } 
+           if(sendCounter==1){
+               sendCounter=2;
            }
            break;
          }
@@ -1152,10 +1156,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     // нога входного сигнала ресет протокола
     void set_input_reset_pin(GPIOPin  *pin = nullptr){ 
        pin->setup(); // захватываем ногу
-       pin->pin_mode(gpio::FLAG_INPUT); // настраиваем ее на выход
-       in_reset_pin_state=pin->digital_read(); // читаем состояние
-       in_reset_pin=pin; // запоминаем пин
+       pin->pin_mode(gpio::FLAG_INPUT); // настраиваем ее на вход
+       this->in_reset_pin_state=pin->digital_read(); // читаем состояние
+       this->in_reset_pin=pin; // запоминаем пин
     }  
+
+    // нога выходного сигнала ресет MCU
+    void set_mcu_reset_pin(GPIOPin  *pin = nullptr) { 
+       pin->setup(); // захватываем ногу
+       pin->pin_mode(gpio::FLAG_INPUT); // настраиваем ее на вход
+       this->mcu_reset_pin_ = pin; 
+    }
 
     // проверка, при необходимости сохранение данных
     inline void saveDataFlash(){
@@ -1209,6 +1220,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         LOG_SENSOR("  ", "Internal Temperature", this->sensor_internal_temperature_);
         LOG_SENSOR("  ", "External Temperature", this->sensor_external_temperature_);
         LOG_SWITCH("  ", "Children lock switch", this->lock_switch);
+        if(mcu_reset_pin_!=nullptr){        
+           LOG_PIN("MCU signal reset pin ", mcu_reset_pin_);
+        }
         if(plan_select!=nullptr){
            ESP_LOGCONFIG(TAG, "  For Shedule in AUTO mode:");
            LOG_SELECT("  ","  Period Selector",this->plan_select);
@@ -1270,12 +1284,20 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         }
 
         static uint32_t cycle_reset_timer=0;
-        if (/*(now-cycle_reset_timer>PROTO_RESTART_UNTERVAL*60*1000) || */
+        if (/*(now-cycle_reset_timer>PROTO_RESTART_INTERVAL*60*1000) || */
                         (now-dataTempTimer>NO_TEMP_RESTART_TIMEOUT*1000)){ // каждые XX минут опрашиваем MCU c нуля или по таймауту если долго не получаем температуру
            ESP_MY_DEBUG(TAG,"Cyclic auto restart protocol interchange");
            cycle_reset_timer=now;
            dataTempTimer=now;
            sendCounter=1; // начать крутить шарманку опроса с начала
+           if(this->mcu_reset_pin_!=nullptr){
+              this->mcu_reset_pin_->pin_mode(gpio::FLAG_OUTPUT); // ногу на выход 
+              this->mcu_reset_pin_->digital_write(LOW); // опускаем ногу в 0
+              ESP_MY_DEBUG(TAG,"Set MCU HARDWARE RESET.");
+              delay(250);
+              this->mcu_reset_pin_->pin_mode(gpio::FLAG_INPUT); // ногу на вход (высокий импеданс)
+              delay(250);
+          }        
         }
 
         // читаем UART порт
@@ -1302,7 +1324,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           if(sendCounter==1){ // отправим первый heatbear
              ESP_MY_DEBUG(TAG,"Send first PING");          
              sendComm(PING); 
-             sendCounter++;
           } else if(sendCounter==2){
              ESP_MY_DEBUG(TAG,"Send Prod_ID request");          
              sendComm(IDENT);
