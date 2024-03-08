@@ -12,6 +12,7 @@
 - Интеграция Tuya https://www.home-assistant.io/integrations/tuya/
 - Интеграция Local Tuya https://github.com/rospogrigio/localtuya
 - Перешить используя проект https://github.com/klausahrenberg/WThermostatBeca и подключить через MQTT
+- Есть и СТАНДАРТНАЯ иинтеграция https://esphome.io/components/tuya.html
 
 Все эти способы рабочие, но имеют недостатки. Где то обязательно нужно наличие подключения к внешним серверам,
 где то вы не сможете использовать весь потенциал устройства, где то будут ошибки и непонятки. Да и ни один из
@@ -41,6 +42,41 @@ WThermostatBeca был описан лишь служебный обмен, ос
 
 Часы синхронизируются автоматически, если задан источник времени.
 
+Пример конфигурирования
+
+```yaml
+climate:
+  - platform: tuya_termo
+    name: devicename
+    uart_id: id_uart_bus
+    time_id: id_sync_time
+    mcu_reset_pin: GPIOxx
+    optimistic: true
+    visual:
+      min_temperature: 5
+      max_temperature: 35
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature:
+      name: Internal Temperature
+    external_temperature:
+      name: External Temperature
+    children_lock:
+      name: Child Lock
+    shedule:
+      selector:
+        name: Plan Day Selector
+      hours:
+        name: Plan Hours
+      minutes:
+        name: Plan Minutes
+      temperature:
+        name: Plan Temperatures
+    product_id:   
+      name: Product Identifier
+```
+
 <b>UPD (20.09.23):</b>
 
 Появились версии с модулем CB3S, на базе BK7231N. В данный момент существует замечательный проект LibreTiny EspHome, надеюсь вы его легко найдете. С его помощью можно скомпилировать прошивку под новый модуль.
@@ -64,13 +100,43 @@ WThermostatBeca был описан лишь служебный обмен, ос
 
 <b>UPD (18.12.23):</b>
 
-Из-за медленной реакции термостатов на бекенах добавлена оptimistic: true/false. По умолчанию - true. При включеной опции публикация данных всегда соответствует установкам пользователя, не взирая на то применил ли установку термостат. В случае неприменимой настроки, она обновится в реальное состояние через некоторое время.
+Из-за медленной реакции термостатов на бекенах добавлена настройка
+```yaml
+- platform: tuya_termo
+  оptimistic: true # оr false
+```
+По умолчанию - true. При включеной опции публикация данных всегда соответствует установкам пользователя, не взирая на то применил ли установку термостат. В случае неприменимой настроки, она обновится в реальное состояние через некоторое время.
 
 <b>UPD (02.03.24):</b>
 
-Добавлена настройка mode_restore: true/false. По умолчанию - false. Настройка включает автовосстановление режима работы термостата после выключения питания. Восстанавливает только режим работы - Mode. Теперь статус подключения к WIFI и серверу передаваемый термостату соответствует реальной ситуации. Ранее статус был фиктивный.
+Добавлена настройка 
+```yaml
+- platform: tuya_termo
+  mode_restore: true # оr false
+```
+По умолчанию - false. Настройка включает автовосстановление режима работы термостата после выключения питания. Восстанавливает только режим работы - Mode. Теперь статус подключения к WIFI и серверу передаваемый термостату соответствует реальной ситуации. Ранее статус был фиктивный.
 
+<b>UPD (07.03.24):</b>
 
+Добавлен выход для ресета MCU термостата. При долгом отсутствии ответа от MCU термостата, на выходе формируется инверсный импульс сброса (замыкание на GND). В нормальном состоянии выход в режиме HI-IMPEDANCE.
+```yaml
+- platform: tuya_termo
+  mcu_reset_pin: GPIOXX
+```
+
+Изменено конфигурирование контролов расписания
+```yaml
+- platform: tuya_termo
+  shedule:
+    selector:
+      name: "Shedule Day Selector"
+    hours:
+      name: "Shedule Hours"
+    minutes:
+      name: "Sheduule Minutes"
+    temperature:
+      name: "Shedule Temperatures"
+```
 
 
 
