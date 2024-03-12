@@ -20,6 +20,7 @@ from esphome.const import (
     ICON_THERMOMETER,
     DEVICE_CLASS_TEMPERATURE,
     STATE_CLASS_MEASUREMENT,
+    ENTITY_CATEGORY_DIAGNOSTIC,
     CONF_TYPE,
     CONF_MIN_VALUE,
     CONF_MAX_VALUE,
@@ -65,10 +66,13 @@ ICON_PRODUCT_ID = 'mdi:cog'
 CONF_ECO_TEMPERATURE= 'eco_temperature'
 CONF_OVERHEAT_TEMPERATURE= 'overheat_temperature'
 CONF_DEADZONE_TEMPERATURE= 'deadzone_temperature'
-CONF_INPUT_RESET_PIN= 'input_reset_pin'
-CONF_MODE_RESTORE= 'mode_restore'
-CONF_MCU_RESET_PIN= 'mcu_reset_pin'
-
+CONF_INPUT_RESET_PIN= 'reset_pin' # вход переинициализации протокола обмена 
+CONF_MCU_RESET_PIN= 'mcu_reset_pin' # выход управления перезагрузкой процессора термостата
+CONF_STATUS_PIN= 'status_pin' # выход светодиода статуса WIFI 
+CONF_MODE_RESTORE= 'mode_restore' # восстанавливать режим работы после перезагрузки (true/false)
+CONF_TIME_SYNC_MARKS= 'time_sync_packets' # регулярные пакеты синхронизации времени (true/false)
+CONF_MCU_RELOAD_COUNTER= 'mcu_reload_counter'
+ICON_MCU_RELOAD_COUNTER= 'mdi:cog-counterclockwise'
 
 tuya_termo_ns = cg.esphome_ns.namespace("tuya_termo")
 TuyaTermo = tuya_termo_ns.class_("TuyaTermo", climate.Climate, cg.Component)
@@ -100,6 +104,11 @@ def validate_plan(config):
        if CONF_SHEDULE in config or CONF_SHEDULE_SELECTOR in shedule or CONF_SHEDULE_TEMPERATURE in shedule or CONF_SHEDULE_MINUTES in shedule or CONF_SHEDULE_HOURS in shedule:
            if CONF_SHEDULE_SELECTOR not in shedule or CONF_SHEDULE_TEMPERATURE not in shedule or CONF_SHEDULE_MINUTES not in shedule or CONF_SHEDULE_HOURS not in shedule:
               raise cv.Invalid(f"Section 'shedule' must have options 'selector', 'hours', 'minutes' and 'temperature'.")
+    return config
+
+def validate_reset_counter(config):
+    if CONF_MCU_RELOAD_COUNTER in config and CONF_MCU_RESET_PIN not in config:
+        raise cv.Invalid(f"Sensor 'mcu_reload_counter' cannot be used without 'mcu_reset_pin'.")
     return config
 
 NumberMode = tuya_termo_ns.enum("NumberMode")
@@ -166,8 +175,18 @@ CONFIG_SCHEMA = cv.All(
 
             # нога входного сигнала сброса
             cv.Optional(CONF_INPUT_RESET_PIN ): pins.gpio_input_pin_schema,
-            # нога ресета MCU термостата
-            cv.Optional(CONF_MCU_RESET_PIN ): pins.gpio_input_pin_schema,
+            # выходная нога ресета MCU термостата
+            cv.Optional(CONF_MCU_RESET_PIN ): pins.gpio_output_pin_schema,
+            # выходная нога отметок синхронизации времени
+            cv.Optional(CONF_STATUS_PIN ): pins.gpio_output_pin_schema,
+            # счетчик перезагрузок
+            cv.Optional(CONF_MCU_RELOAD_COUNTER): sensor.sensor_schema(
+               accuracy_decimals=1,
+               state_class=STATE_CLASS_MEASUREMENT,
+               entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+               icon=ICON_MCU_RELOAD_COUNTER,
+            ),
+            # источник синхронизации времени
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_INTERNAL_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
@@ -183,7 +202,8 @@ CONFIG_SCHEMA = cv.All(
                 device_class=DEVICE_CLASS_TEMPERATURE,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
-            cv.Optional(CONF_MODE_RESTORE, default=False): cv.boolean,
+            cv.Optional(CONF_MODE_RESTORE, default=True): cv.boolean,
+            cv.Optional(CONF_TIME_SYNC_MARKS, default=False): cv.boolean,
             cv.Optional(CONF_SUPPORTED_MODES): cv.ensure_list(validate_modes),
             cv.Optional(CONF_SUPPORTED_PRESETS): cv.ensure_list(validate_presets),
             cv.Optional(CONF_CHILDREN_LOCK): switch.switch_schema(
@@ -193,38 +213,6 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PRODUCT_ID): text_sensor.text_sensor_schema(
                icon=ICON_PRODUCT_ID,
             ),
-
-#            cv.Optional(CONF_SHEDULE_HOURS): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-#               {
-#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_HOURS): cv.icon,
-#                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
-#               },
-#            ),
-#            cv.Optional(CONF_SHEDULE_MINUTES): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-#               {
-#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_MINUTES): cv.icon,
-#                   cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
-#               },
-#            ),
-#            cv.Optional(CONF_SHEDULE_TEMPERATURE): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-#               {
-#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
-#                   cv.Optional(CONF_ICON, default=ICON_THERMOMETER): cv.icon,
-#               },
-#            ),
-#            cv.Optional(CONF_SHEDULE_SELECTOR): select.SELECT_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-#               {
-#                   cv.GenerateID(): cv.declare_id(TuyaTermo_Select),
-#                   cv.Optional(CONF_ICON, default=ICON_SHEDULE_SELECTOR): cv.icon,
-#               },
-#            ),
-            #cv.Optional(CONF_CHILDREN_LOCK): lock.LOCK_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
-            #   {
-            #       cv.GenerateID(): cv.declare_id(TuyaTermo_Lock),
-            #   },
-            #),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -232,6 +220,7 @@ CONFIG_SCHEMA = cv.All(
     output_info,
     validate_pins,
     validate_plan,
+    validate_reset_counter,
 )
 
 async def to_code(config):
@@ -290,18 +279,24 @@ async def to_code(config):
         cg.add(var.set_visual_temperature_overheat(visual[CONF_OVERHEAT_TEMPERATURE]))
     if CONF_DEADZONE_TEMPERATURE in visual:
         cg.add(var.set_visual_temperature_deadzone(visual[CONF_DEADZONE_TEMPERATURE]))
-    
     if CONF_INPUT_RESET_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_INPUT_RESET_PIN])
         cg.add(var.set_input_reset_pin(pin))
-    
     if CONF_MCU_RESET_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_MCU_RESET_PIN])
         cg.add(var.set_mcu_reset_pin(pin))
-
+        cg.add_define("USE_OTA_STATE_CALLBACK")
+    if CONF_STATUS_PIN in config:
+        pin = await cg.gpio_pin_expression(config[CONF_STATUS_PIN])
+        cg.add(var.set_status_pin(pin))
     if CONF_MODE_RESTORE in config:
         cg.add(var.set_mode_restore(config[CONF_MODE_RESTORE]))
-
+    if CONF_TIME_SYNC_MARKS in config:
+        cg.add(var.set_time_sync_marks(config[CONF_TIME_SYNC_MARKS]))
+    if (CONF_MCU_RELOAD_COUNTER) in config:
+        sens = await sensor.new_sensor(config[CONF_MCU_RELOAD_COUNTER])
+        cg.add(var.set_reset_counter(sens))
+    
     if CONF_SHEDULE in config:
         shed = config[CONF_SHEDULE]
         if CONF_SHEDULE_HOURS in shed:
