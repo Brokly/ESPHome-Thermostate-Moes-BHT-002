@@ -120,7 +120,17 @@ climate:
 
 Теперь при восстановлении режим работы после пропадания питания (mode_restore: true), восстанавливаются все оперативные параметры термостата (режим работы, пресет, целевая температура).
 
-Добавлен выход для ресета MCU термостата. При долгом отсутствии ответа от MCU термостата, на выходе формируется инверсный импульс сброса (замыкание на GND). В нормальном состоянии выход в режиме HI-IMPEDANCE.
+Добавлен выход для ресета MCU термостата. При долгом отсутствии ответа от MCU термостата, на выходе формируется инверсный импульс сброса (замыкание на GND). В нормальном состоянии выход в режиме HI-IMPEDANCE. Для использования функции перезагрузки термостата требуеются аппаратные доработки. Нужно прокинуть провод от управления модудем DC12->DC5, на выходную ножку термостата.
+
+![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/986822d7-a11e-4a6a-9523-2422d72b2ae4)
+
+Моя версия термостата использует преобразователь [LP6498A](http://www.lowpowersemi.com/storage/files/2023-05/7af3ba3edb6fc52b54c51add36301d7e.pdf)
+
+Точка подключения для управления режимом работы dc/dc преобразователя
+![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/62a75737-76d4-4040-a4ac-c83248175eaf)![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/44d7258b-4a69-4528-916b-e9c49c1f42ee)
+
+
+
 ```yaml
 - platform: tuya_termo
   mcu_reset_pin: GPIOXX
@@ -166,4 +176,42 @@ climate:
 ```
 Но как правило, эти пины нужно конфигурировать по требованию MCU термостата. Если термостату требуется такая конфиигурация, то в лог будут выданы сообщения уровня ERROR и/или WARNING, в которых будут указаны нужные пины. 
 
-
+Примерная полная конфигурация (не все что есть в ней нужно Вам):
+```yaml
+climate:
+  - platform: tuya_termo
+    name: ${upper_devicename}
+    uart_id: uart_bus # uart шина для управления MCU термостата
+    time_id: sync_time # источник синхронизации времени
+    time_sync_packets: false # пакеты синхронизациии времени, для некоторых версий устройств (по умолчанию false)
+    optimistic: true 
+    mode_restore: true # настройка восстановления режима работы после перезагрузки (по умолчанию true)
+    mcu_reset_pin: P9  # выходной пин принудительного сброса MCU термостата (только для доработанных термостатов)
+    mcu_reload_counter: # счетчик принудительных перезагрузок MCU термостата
+    reset_pin: P14 # входной пин для реинициализации протокола обмена с MCU, требуется для некоторых термостатов
+    status_pin: P15 # выходной пин индикации сетевого статуса, требуется для некоторых термостатов, но можно установить светодиод
+      name: ${upper_devicename} MCU Reset Counter
+    visual: # настройки для правильного отображения виджета, в большинстве случаев используются по умолчанию
+      min_temperature: 5
+      max_temperature: 35 
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature: # сенсор температуры воздуха в помещении
+      name: ${upper_devicename} Internal Temperature  
+    external_temperature: # внешний сенсор температуры пола
+      name: ${upper_devicename} External Temperature
+    children_lock:
+      name: ${upper_devicename} Child Lock
+    shedule: # набор контролов для управления расписанием автономной работы термостата
+      selector:
+        name: ${upper_devicename} Plan Day Selector
+      hours:
+        name: ${upper_devicename} Plan Hours
+      minutes:
+        name: ${upper_devicename} Plan Minutes
+      temperature:
+        name: ${upper_devicename} Plan Temperatures
+    product_id:   
+      name: ${upper_devicename} Product Identifier
+```
