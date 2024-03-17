@@ -1556,27 +1556,27 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
            dataTempTimer=esphome::millis();
            sendCounter=1; // начать крутить шарманку опроса с начала
            oldNetState=0xFF;
-           if (_tuya_serial!=nullptr){
-             _tuya_serial->flush();
+           storeData.resetCounter++; // счетчик принудительных перезагрузок MCU 
+           saveDataFlash();
+           if(sensor_reset_counter_!=nullptr){ // публикуем счетчик перезагрузок
+              sensor_reset_counter_->publish_state(storeData.resetCounter);
            }
-           if(this->mcu_reset_pin_!=nullptr){
+           if(this->mcu_reset_pin_!=nullptr){ // если есть нога ресета производим ресет MCU термостата
               this->mcu_reset_pin_->pin_mode(gpio::FLAG_OUTPUT); // ногу на выход 
               this->mcu_reset_pin_->digital_write(LOW); // опускаем ногу в 0
-              storeData.resetCounter++; // счетчик принудительных перезагрузок MCU 
-              if(sensor_reset_counter_!=nullptr){ // публикуем счетчик перезагрузок
-                 sensor_reset_counter_->publish_state(storeData.resetCounter);
-              }
               ESP_LOGE(TAG,"Set MCU HARDWARE RESET.");
-              saveDataFlash();
               delay(250);
               this->mcu_reset_pin_->pin_mode(gpio::FLAG_INPUT); // ногу на вход (высокий импеданс)
-              if(full_reset_counter++>3){ // если 4 подряд раза не получилось инициализировать протокол, то перегрузим и модуль
-                 ESP_LOGE(TAG,"Full RESET.");
-                 delay(500);
-                 App.safe_reboot();
-              }
+           }
+           if(full_reset_counter++>3){ // если 4 раза подряд не получилось инициализировать протокол, то перегрузим и модуль
+              ESP_LOGE(TAG,"Full RESET.");
+              delay(500);
+              App.safe_reboot();
            }
            delay(500);
+           if (_tuya_serial!=nullptr){ 
+             _tuya_serial->flush();
+           }
         }
 
         // читаем UART порт
