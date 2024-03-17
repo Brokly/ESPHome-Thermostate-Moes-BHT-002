@@ -106,11 +106,6 @@ def validate_plan(config):
               raise cv.Invalid(f"Section 'shedule' must have options 'selector', 'hours', 'minutes' and 'temperature'.")
     return config
 
-def validate_reset_counter(config):
-    if CONF_MCU_RELOAD_COUNTER in config and CONF_MCU_RESET_PIN not in config:
-        raise cv.Invalid(f"Sensor 'mcu_reload_counter' cannot be used without 'mcu_reset_pin'.")
-    return config
-
 NumberMode = tuya_termo_ns.enum("NumberMode")
 
 NUMBER_MODES = {
@@ -220,7 +215,6 @@ CONFIG_SCHEMA = cv.All(
     output_info,
     validate_pins,
     validate_plan,
-    validate_reset_counter,
 )
 
 async def to_code(config):
