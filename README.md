@@ -12,6 +12,7 @@
 - Интеграция Tuya https://www.home-assistant.io/integrations/tuya/
 - Интеграция Local Tuya https://github.com/rospogrigio/localtuya
 - Перешить используя проект https://github.com/klausahrenberg/WThermostatBeca и подключить через MQTT
+- Есть и СТАНДАРТНАЯ иинтеграция https://esphome.io/components/tuya.html
 
 Все эти способы рабочие, но имеют недостатки. Где то обязательно нужно наличие подключения к внешним серверам,
 где то вы не сможете использовать весь потенциал устройства, где то будут ошибки и непонятки. Да и ни один из
@@ -41,6 +42,41 @@ WThermostatBeca был описан лишь служебный обмен, ос
 
 Часы синхронизируются автоматически, если задан источник времени.
 
+Пример конфигурирования
+
+```yaml
+climate:
+  - platform: tuya_termo
+    name: devicename
+    uart_id: id_uart_bus
+    time_id: id_sync_time
+    mcu_reset_pin: GPIOxx
+    optimistic: true
+    visual:
+      min_temperature: 5
+      max_temperature: 35
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature:
+      name: Internal Temperature
+    external_temperature:
+      name: External Temperature
+    children_lock:
+      name: Child Lock
+    shedule:
+      selector:
+        name: Plan Day Selector
+      hours:
+        name: Plan Hours
+      minutes:
+        name: Plan Minutes
+      temperature:
+        name: Plan Temperatures
+    product_id:   
+      name: Product Identifier
+```
+
 <b>UPD (20.09.23):</b>
 
 Появились версии с модулем CB3S, на базе BK7231N. В данный момент существует замечательный проект LibreTiny EspHome, надеюсь вы его легко найдете. С его помощью можно скомпилировать прошивку под новый модуль.
@@ -64,9 +100,117 @@ WThermostatBeca был описан лишь служебный обмен, ос
 
 <b>UPD (18.12.23):</b>
 
-Из-за медленной реакции термостатов на бекенах добавлена Optimistic mode. Теперь публикация данных всегда соответствует установкам пользователя, не взирая на то применил ли установку термостат. В случае неприменимой настроки, она обновится в реальное состояние через некоторое время.
+Из-за медленной реакции термостатов на бекенах добавлена настройка
+```yaml
+- platform: tuya_termo
+  оptimistic: true # оr false
+```
+По умолчанию - true. При включеной опции публикация данных всегда соответствует установкам пользователя, не взирая на то применил ли установку термостат. В случае неприменимой настроки, она обновится в реальное состояние через некоторое время.
+
+<b>UPD (02.03.24):</b>
+
+Добавлена настройка 
+```yaml
+- platform: tuya_termo
+  mode_restore: true # оr false
+```
+По умолчанию - false. Настройка включает автовосстановление режима работы термостата после выключения питания. Восстанавливает только режим работы - Mode. Теперь статус подключения к WIFI и серверу передаваемый термостату соответствует реальной ситуации. Ранее статус был фиктивный.
+
+<b>UPD (07.03.24):</b>
+
+Теперь при восстановлении режим работы после пропадания питания (mode_restore: true), восстанавливаются все оперативные параметры термостата (режим работы, пресет, целевая температура).
+
+Добавлен выход для ресета MCU термостата. При долгом отсутствии ответа от MCU термостата, на выходе формируется инверсный импульс сброса (замыкание на GND). В нормальном состоянии выход в режиме HI-IMPEDANCE. Для использования функции перезагрузки термостата требуеются аппаратные доработки. Нужно прокинуть провод от управления модудем DC12->DC5, на выходную ножку термостата.
+
+![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/986822d7-a11e-4a6a-9523-2422d72b2ae4)
+
+Моя версия термостата использует преобразователь [LP6498A](http://www.lowpowersemi.com/storage/files/2023-05/7af3ba3edb6fc52b54c51add36301d7e.pdf)
+
+Точка подключения для управления режимом работы dc/dc преобразователя
+![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/62a75737-76d4-4040-a4ac-c83248175eaf)![image](https://github.com/Brokly/ESPHome-Thermostate-Moes-BHT-002/assets/11642286/44d7258b-4a69-4528-916b-e9c49c1f42ee)
 
 
 
+```yaml
+- platform: tuya_termo
+  mcu_reset_pin: GPIOXX
+```
 
+Изменено конфигурирование контролов расписания
+```yaml
+- platform: tuya_termo
+  shedule:
+    selector:
+      name: "Shedule Day Selector"
+    hours:
+      name: "Shedule Hours"
+    minutes:
+      name: "Sheduule Minutes"
+    temperature:
+      name: "Shedule Temperatures"
+```
 
+<b>UPD (12.03.24):</b>
+
+Добавлен счетчик перезагрузок. Счетчик считает количество перезагрузок, при прошивке по OTA сбрасывается в ноль. Попытка перезагрузки происходит при долгом отсутствии ответа от MCU термостата. Если три попытки восстановить связь безуспешны, производится полная перезагрузка модуля связи.
+```yaml
+- platform: tuya_termo
+  mcu_reload_counter:
+    name: MCU Reset Counter
+```
+
+Добавлена настройка позволяющая включить/выключить пакеты синхронизации времени. Некоторым термостатам, для правильной работы часов, требуются ежесекундные пакеты, которые позволяют часам идти, в противном случае, часы стоят.
+По умолчанию настрока выключена (false), ежесекундные пакеты не отправляются. Ниже пример конфигурации со включенной отправкой ежесекундных пакетов
+```yaml
+- platform: tuya_termo
+  time_id: sync_time_id
+  time_sync_packets: true
+```
+
+Добавлены настройки дополнительных выходов. Некоторые устройства требуют управление через пины. Это вход ресета протокола reset_pin, получив на этом пине изменение уровня сигнала модуль управления проводит реинициализацию, с передачей всех настроек так, как будто устройство только что включили. Так же выход status_pin, преположительно, к этому пину должен быть подключен светодиод устройства, индицирующий режим работы сети. Эти пины могут быть добавлены в конфигурацию:
+```yaml
+- platform: tuya_termo
+  status_pin: Pxx
+  reset_pin: Pxx
+```
+Но как правило, эти пины нужно конфигурировать по требованию MCU термостата. Если термостату требуется такая конфиигурация, то в лог будут выданы сообщения уровня ERROR и/или WARNING, в которых будут указаны нужные пины. 
+
+Примерная полная конфигурация (не все что есть в ней нужно Вам):
+```yaml
+climate:
+  - platform: tuya_termo
+    name: ${upper_devicename}
+    uart_id: uart_bus # uart шина для управления MCU термостата
+    time_id: sync_time # источник синхронизации времени
+    time_sync_packets: false # пакеты синхронизациии времени, для некоторых версий устройств (по умолчанию false)
+    optimistic: true 
+    mode_restore: true # настройка восстановления режима работы после перезагрузки (по умолчанию true)
+    mcu_reset_pin: P9  # выходной пин принудительного сброса MCU термостата (только для доработанных термостатов)
+      name: ${upper_devicename} MCU Reset Counter
+    mcu_reload_counter: # счетчик принудительных перезагрузок MCU термостата
+    reset_pin: P14 # входной пин для реинициализации протокола обмена с MCU, требуется для некоторых термостатов
+    status_pin: P15 # выходной пин индикации сетевого статуса, требуется для некоторых термостатов, но можно установить светодиод
+    visual: # настройки для правильного отображения виджета, в большинстве случаев используются по умолчанию
+      min_temperature: 5
+      max_temperature: 35 
+      eco_temperature: 20
+      overheat_temperature: 45
+      deadzone_temperature: 1
+    internal_temperature: # сенсор температуры воздуха в помещении
+      name: ${upper_devicename} Internal Temperature  
+    external_temperature: # внешний сенсор температуры пола
+      name: ${upper_devicename} External Temperature
+    children_lock:
+      name: ${upper_devicename} Child Lock
+    shedule: # набор контролов для управления расписанием автономной работы термостата
+      selector:
+        name: ${upper_devicename} Plan Day Selector
+      hours:
+        name: ${upper_devicename} Plan Hours
+      minutes:
+        name: ${upper_devicename} Plan Minutes
+      temperature:
+        name: ${upper_devicename} Plan Temperatures
+    product_id:   
+      name: ${upper_devicename} Product Identifier
+```
