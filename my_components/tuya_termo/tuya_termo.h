@@ -24,7 +24,8 @@
 #include "esphome/core/util.h"
 
 #ifdef USE_OTA_STATE_CALLBACK
-   #include "esphome/components/ota/ota_component.h"
+   //#include "esphome/components/ota/ota_component.h"
+   #include "esphome/components/ota/ota_backend.h"
 #endif
 
 #ifdef USE_API
@@ -1382,9 +1383,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         }
         #ifdef USE_OTA_STATE_CALLBACK
            // обнуление счетчика перезагрузок при прошивке
-           if(esphome::ota::global_ota_component!=nullptr){
-              esphome::ota::global_ota_component->add_on_state_callback(
-                 [this](esphome::ota::OTAState state, float fl, uint8_t b){
+           if(esphome::ota::get_global_ota_callback()!=nullptr){
+              esphome::ota::get_global_ota_callback()->add_on_state_callback( 
+                 [this](esphome::ota::OTAState state, float progress, uint8_t error, esphome::ota::OTAComponent *comp){
                     if(state == esphome::ota::OTA_COMPLETED){
                        this->storeData.resetCounter=0; // сбросить счетчик перезагрузок MCU 
                        saveDataFlash();
