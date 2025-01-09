@@ -12,7 +12,7 @@
 - Интеграция Tuya https://www.home-assistant.io/integrations/tuya/
 - Интеграция Local Tuya https://github.com/rospogrigio/localtuya
 - Перешить используя проект https://github.com/klausahrenberg/WThermostatBeca и подключить через MQTT
-- Есть и СТАНДАРТНАЯ иинтеграция https://esphome.io/components/tuya.html
+- Есть и СТАНДАРТНАЯ интеграция https://esphome.io/components/tuya.html
 
 Все эти способы рабочие, но имеют недостатки. Где то обязательно нужно наличие подключения к внешним серверам,
 где то вы не сможете использовать весь потенциал устройства, где то будут ошибки и непонятки. Да и ни один из
