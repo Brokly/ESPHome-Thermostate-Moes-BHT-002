@@ -187,6 +187,13 @@ climate:
 
 Добавил сохранение и восстановление расписания работы термостата в режиме AUTO. Очень странно, но при выключении питания, мой термостат не сохранял расписание.
 
+Добавлена настройка точности установки тепературы. Может быть либо 1 градус, либо половина (0.5) градуса:
+```yaml
+- platform: tuya_termo
+  visual:
+    precision_temperature: 0.5 # лбо 1.0, другие значения недопустимы, по умолчанию 0.5
+```
+
 Примерная полная конфигурация (не все что есть в ней нужно Вам):
 ```yaml
 climate:
@@ -209,6 +216,7 @@ climate:
       eco_temperature: 20
       overheat_temperature: 45
       deadzone_temperature: 1
+      precision_temperature: 0.5
     internal_temperature: # сенсор температуры воздуха в помещении
       name: ${upper_devicename} Internal Temperature  
     external_temperature: # внешний сенсор температуры пола
