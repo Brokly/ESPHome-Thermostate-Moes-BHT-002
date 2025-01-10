@@ -646,7 +646,6 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void setTargetTemp(uint8_t temp){
        if(temperature_step>0.9){
           temp&=0xFE;   
-          ESP_LOGE("","Target temp core");       
        }
        ESP_LOGD(TAG,"Send target temperature: %.1f",getTemp(temp));
        uint8_t setTemp[]={0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, temp};
