@@ -421,6 +421,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
+       if(temperature_step<0.9){
+          if(raw & 1){
+             return (float)raw/2;
+          }
+       }
        return float((int8_t)raw)/2;
     }
 
@@ -639,9 +644,13 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // отправка целевой температуры
     void setTargetTemp(uint8_t temp){
+       if(temperature_step>0.9){
+          temp&=0xFE;   
+          ESP_LOGE("","Target temp core");       
+       }
        ESP_LOGD(TAG,"Send target temperature: %.1f",getTemp(temp));
        uint8_t setTemp[]={0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, temp};
-       sendCommand(DATAPOINT_DELIVER,sizeof(setTemp), setTemp);   
+       sendCommand(DATAPOINT_DELIVER,sizeof(setTemp), setTemp);  
     }
 
 // отправка данных о расписании
