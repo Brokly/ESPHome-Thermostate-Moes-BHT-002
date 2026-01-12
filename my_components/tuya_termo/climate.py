@@ -30,6 +30,7 @@ from esphome.const import (
     CONF_MAX_TEMPERATURE,
     CONF_MIN_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
+    CONF_TARGET_TEMPERATURE,
     CONF_VISUAL,
     CONF_HOURS,
     CONF_MINUTES,
@@ -69,18 +70,19 @@ CONF_DEADZONE_TEMPERATURE= 'deadzone_temperature'
 CONF_INPUT_RESET_PIN= 'reset_pin' # вход переинициализации протокола обмена 
 CONF_MCU_RESET_PIN= 'mcu_reset_pin' # выход управления перезагрузкой процессора термостата
 CONF_STATUS_PIN= 'status_pin' # выход светодиода статуса WIFI 
+CONF_HEAT_RELAY_PIN= 'heater_status_pin' # вход сигнала статуса состояния реле нагрева
 CONF_MODE_RESTORE= 'mode_restore' # восстанавливать режим работы после перезагрузки (true/false)
 CONF_TIME_SYNC_MARKS= 'time_sync_packets' # регулярные пакеты синхронизации времени (true/false)
 CONF_MCU_RELOAD_COUNTER= 'mcu_reload_counter'
 ICON_MCU_RELOAD_COUNTER= 'mdi:cog-counterclockwise'
+CONF_CURRENT_TEMPERATURE = "current_temperature"
+CONF_TEMPERATURE_PRECISION = "precision_temperature"
 
 tuya_termo_ns = cg.esphome_ns.namespace("tuya_termo")
 TuyaTermo = tuya_termo_ns.class_("TuyaTermo", climate.Climate, cg.Component)
 TuyaTermo_Switch = tuya_termo_ns.class_("TuyaTermo_Switch", switch.Switch, cg.Component)
 TuyaTermo_Number = tuya_termo_ns.class_("TuyaTermo_Number", number.Number, cg.Component)
 TuyaTermo_Select = tuya_termo_ns.class_("TuyaTermo_Select", select.Select, cg.Component)
-#TuyaTermo_Lock = tuya_termo_ns.class_("TuyaTermo_Lock", lock.Lock, cg.Component)
-#check_plan = 0
 
 ALLOWED_CLIMATE_MODES = {
     "AUTO": ClimateMode.CLIMATE_MODE_AUTO,
@@ -105,6 +107,17 @@ def validate_plan(config):
            if CONF_SHEDULE_SELECTOR not in shedule or CONF_SHEDULE_TEMPERATURE not in shedule or CONF_SHEDULE_MINUTES not in shedule or CONF_SHEDULE_HOURS not in shedule:
               raise cv.Invalid(f"Section 'shedule' must have options 'selector', 'hours', 'minutes' and 'temperature'.")
     return config
+    
+def validate_precision_temperature(config):
+    if CONF_VISUAL in config:
+       conf=config[CONF_VISUAL]
+       if CONF_TEMPERATURE_STEP in  conf:
+          raise cv.Invalid(f"Invalid 'temperature_step' setting, use 'precision_temperature'.")
+       if CONF_TEMPERATURE_PRECISION in conf:
+          val=conf[CONF_TEMPERATURE_PRECISION] 
+          if not(val==0.5 or val==1.0):
+             raise cv.Invalid(f"Invalid 'precision_temperature' value, set '0.5' or '1.0'")
+    return config
 
 NumberMode = tuya_termo_ns.enum("NumberMode")
 
@@ -119,7 +132,7 @@ def output_info(config):
     return config
 
 CONFIG_SCHEMA = cv.All(
-    climate.CLIMATE_SCHEMA.extend(
+    climate.climate_schema(climate.Climate).extend(
         {
             cv.GenerateID(): cv.declare_id(TuyaTermo),
             cv.Optional(CONF_OPTIMISTIC, default="true"): cv.boolean,
@@ -127,39 +140,35 @@ CONFIG_SCHEMA = cv.All(
               {
                 cv.Optional(CONF_MIN_TEMPERATURE, default=5.0): cv.temperature,
                 cv.Optional(CONF_MAX_TEMPERATURE, default=35.0): cv.temperature,
-                #cv.Optional(CONF_TEMPERATURE_STEP): cv.float_with_unit(
-                #    "visual_temperature", "(°C|° C|°|C|° K|° K|K|°F|° F|F)?"
-                #),
+                cv.Optional(CONF_TEMPERATURE_PRECISION, default="0.5"): cv.float_range(min=0.5, max=1.0),
                 cv.Optional(CONF_ECO_TEMPERATURE, default=20.0): cv.temperature,
                 cv.Optional(CONF_OVERHEAT_TEMPERATURE, default=45.0): cv.temperature,
-                cv.Optional(CONF_DEADZONE_TEMPERATURE, default=1.0): cv.float_range(
-                    min=1.0, max=5.0
-                ),
+                cv.Optional(CONF_DEADZONE_TEMPERATURE, default=1.0): cv.float_range(min=1.0, max=5.0),
               }
             ),
             cv.Optional(CONF_SHEDULE, default={}): cv.Schema(
               {
-                cv.Optional(CONF_SHEDULE_SELECTOR): select.SELECT_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                cv.Optional(CONF_SHEDULE_SELECTOR): select.select_schema(select.Select).extend(cv.COMPONENT_SCHEMA).extend(
                   {
                      cv.GenerateID(): cv.declare_id(TuyaTermo_Select),
                      cv.Optional(CONF_ICON, default=ICON_SHEDULE_SELECTOR): cv.icon,
                   },
                 ),
-                cv.Optional(CONF_SHEDULE_HOURS): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                cv.Optional(CONF_SHEDULE_HOURS): number.number_schema(number.Number).extend(cv.COMPONENT_SCHEMA).extend(
                   {
                      cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
                      cv.Optional(CONF_ICON, default=ICON_SHEDULE_HOURS): cv.icon,
                      cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
                   },
                 ),
-                cv.Optional(CONF_SHEDULE_MINUTES): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                cv.Optional(CONF_SHEDULE_MINUTES): number.number_schema(number.Number).extend(cv.COMPONENT_SCHEMA).extend(
                   {
                      cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
                      cv.Optional(CONF_ICON, default=ICON_SHEDULE_MINUTES): cv.icon,
                      cv.Optional(CONF_MODE, default="BOX"): cv.enum(NUMBER_MODES, upper=True),
                   },
                 ),
-                cv.Optional(CONF_SHEDULE_TEMPERATURE): number.NUMBER_SCHEMA.extend(cv.COMPONENT_SCHEMA).extend(
+                cv.Optional(CONF_SHEDULE_TEMPERATURE): number.number_schema(number.Number).extend(cv.COMPONENT_SCHEMA).extend(
                   {
                      cv.GenerateID(): cv.declare_id(TuyaTermo_Number),
                      cv.Optional(CONF_ICON, default=ICON_THERMOMETER): cv.icon,
@@ -170,6 +179,8 @@ CONFIG_SCHEMA = cv.All(
 
             # нога входного сигнала сброса
             cv.Optional(CONF_INPUT_RESET_PIN ): pins.gpio_input_pin_schema,
+            # нога входного сигнала осстояня реле нагрева
+            cv.Optional(CONF_HEAT_RELAY_PIN ): pins.gpio_input_pin_schema,
             # выходная нога ресета MCU термостата
             cv.Optional(CONF_MCU_RESET_PIN ): pins.gpio_output_pin_schema,
             # выходная нога отметок синхронизации времени
@@ -215,6 +226,7 @@ CONFIG_SCHEMA = cv.All(
     output_info,
     validate_pins,
     validate_plan,
+    validate_precision_temperature,
 )
 
 async def to_code(config):
@@ -265,8 +277,8 @@ async def to_code(config):
         cg.add(var.set_visual_min_temperature_override(visual[CONF_MIN_TEMPERATURE]))
     if CONF_MAX_TEMPERATURE in visual:
         cg.add(var.set_visual_max_temperature_override(visual[CONF_MAX_TEMPERATURE]))
-    #if CONF_TEMPERATURE_STEP in visual:
-    #    cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_STEP]))
+    if CONF_TEMPERATURE_PRECISION in visual:
+        cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_PRECISION]))
     if CONF_ECO_TEMPERATURE in visual:
         cg.add(var.set_visual_temperature_eco(visual[CONF_ECO_TEMPERATURE]))
     if CONF_OVERHEAT_TEMPERATURE in visual:
@@ -276,6 +288,9 @@ async def to_code(config):
     if CONF_INPUT_RESET_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_INPUT_RESET_PIN])
         cg.add(var.set_input_reset_pin(pin))
+    if CONF_HEAT_RELAY_PIN in config:
+        pin = await cg.gpio_pin_expression(config[CONF_HEAT_RELAY_PIN])
+        cg.add(var.set_real_heat_pin(pin))
     if CONF_MCU_RESET_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_MCU_RESET_PIN])
         cg.add(var.set_mcu_reset_pin(pin))
@@ -303,8 +318,8 @@ async def to_code(config):
             cg.add(var.set_minutes_number(numb))
         if CONF_SHEDULE_TEMPERATURE in shed:
             conf = shed[CONF_SHEDULE_TEMPERATURE]
-            #numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_STEP])
-            numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=0.5)
+            #numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=0.5)
+            numb = await number.new_number(conf, min_value=visual[CONF_MIN_TEMPERATURE], max_value=visual[CONF_MAX_TEMPERATURE], step=visual[CONF_TEMPERATURE_PRECISION])
             cg.add(var.set_temperatures_number(numb))
         if CONF_SHEDULE_SELECTOR in shed:
             conf = shed[CONF_SHEDULE_SELECTOR]
