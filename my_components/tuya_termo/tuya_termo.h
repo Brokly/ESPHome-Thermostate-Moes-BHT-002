@@ -1336,7 +1336,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        });
        //select_->publish_state(w1); //дергаем первый раз для инициализации
        auto call = plan_select->make_call(); // грузим данные в контрол часов
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+       call.set_option(w1,strlen(w1));
+#else
        call.set_option(w1);
+#endif
        call.perform();
        timer_plan_change=0;
        refresh_controls(1);
