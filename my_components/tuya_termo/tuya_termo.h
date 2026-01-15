@@ -314,28 +314,33 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
 class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
    private:
     
-    const std::string TERMO_FIRMWARE_VERSION = "0.0.7";
+    const char* TERMO_FIRMWARE_VERSION = "0.0.7";
     // хидер протокола обмена с термостатом
     const uint8_t COMMAND_START[2] = {0x55, 0xAA};
     // для Select
-    const std::string w1="Week day 1";
-    const std::string w2="Week day 2";
-    const std::string w3="Week day 3";
-    const std::string w4="Week day 4";
-    const std::string w5="Week day 5";
-    const std::string w6="Week day 6";
-    const std::string sa1="Saturday 1";
-    const std::string sa2="Saturday 2";
-    const std::string sa3="Saturday 3";
-    const std::string sa4="Saturday 4";
-    const std::string sa5="Saturday 5";
-    const std::string sa6="Saturday 6";
-    const std::string su1="Sunday 1";
-    const std::string su2="Sunday 2";
-    const std::string su3="Sunday 3";
-    const std::string su4="Sunday 4";
-    const std::string su5="Sunday 5";
-    const std::string su6="Sunday 6";
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    #define myStr const char*
+#else
+    #define myStr const std::string
+#endif
+    myStr w1="Week day 1";
+    myStr w2="Week day 2";
+    myStr w3="Week day 3";
+    myStr w4="Week day 4";
+    myStr w5="Week day 5";
+    myStr w6="Week day 6";
+    myStr sa1="Saturday 1";
+    myStr sa2="Saturday 2";
+    myStr sa3="Saturday 3";
+    myStr sa4="Saturday 4";
+    myStr sa5="Saturday 5";
+    myStr sa6="Saturday 6";
+    myStr su1="Sunday 1";
+    myStr su2="Sunday 2";
+    myStr su3="Sunday 3";
+    myStr su4="Sunday 4";
+    myStr su5="Sunday 5";
+    myStr su6="Sunday 6";
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
     const std::initializer_list<const char *> str_plan =
 #else
@@ -1438,7 +1443,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void dump_config() {
         ESP_LOGCONFIG(TAG, "Tuya Termostate:");
         LOG_TEXT_SENSOR("  ", "MCU product ID", this->sensor_mcu_id_);
-        ESP_LOGCONFIG(TAG, "  Firmware version: %s", TERMO_FIRMWARE_VERSION.c_str());
+        ESP_LOGCONFIG(TAG, "  Firmware version: %s", TERMO_FIRMWARE_VERSION);
         ESP_LOGCONFIG(TAG, "Optimistic: %s", YESNO(this->_optimistic));
         ESP_LOGCONFIG(TAG, "Mode restore: %s", YESNO(this->_modeRestore));
         ESP_LOGCONFIG(TAG, "Periodic time marks pakets: %s", YESNO(this->_syncMarks));
