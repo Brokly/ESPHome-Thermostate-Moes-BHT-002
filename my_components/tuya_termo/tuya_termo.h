@@ -24,6 +24,12 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/util.h"
 
+#if __has_include("esphome/core/macros.h")
+   #include "esphome/core/macros.h" // VERSION_CODE
+#else
+   #define VERSION_CODE(major, minor, patch) ((major) << 16 | (minor) << 8 | (patch))
+#endif
+
 #ifdef USE_OTA_STATE_CALLBACK
    #include "esphome/components/ota/ota_backend.h"
 #endif
