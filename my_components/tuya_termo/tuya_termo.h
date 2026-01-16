@@ -298,10 +298,16 @@ class TuyaTermo_Number : public number::Number, public Component, public esphome
 class TuyaTermo_Select : public select::Select, public Component, public esphome::Parented<TuyaTermo> {
  protected:
     void control(const std::string &value) override {
-       if(this->state!=value){
-         this->publish_state(value); 
-         //this->state_callback_.call(value);
-       }
+       if(
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
+        this->current_option().compare(value)!=0
+#else
+        this->state!=value
+#endif
+       ){
+          this->publish_state(value); 
+          //this->state_callback_.call(value);
+        }
     }
  friend class TuyaTermo;   
 };
