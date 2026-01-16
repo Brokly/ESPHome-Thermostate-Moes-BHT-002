@@ -19,9 +19,16 @@
 #include "esphome/components/number/number.h"
 #include "esphome/components/lock/lock.h"
 #include "esphome/components/time/real_time_clock.h"
+#include "esphome/core/version.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/util.h"
+
+#if __has_include("esphome/core/macros.h")
+   #include "esphome/core/macros.h" // VERSION_CODE
+#else
+   #define VERSION_CODE(major, minor, patch) ((major) << 16 | (minor) << 8 | (patch))
+#endif
 
 #ifdef USE_OTA_STATE_CALLBACK
    #include "esphome/components/ota/ota_backend.h"
@@ -43,7 +50,7 @@
 //#define ESP_LOGV ESP_LOGD // для удобства отладки, могу переключить сообщения от компонента на любой уровень
 //#define ESP_LOGVV ESP_LOGD // для удобства отладки, могу переключить сообщения от компонента на любой уровень
 //#define PRINT_RAW_PROTO // включает печатать лог обмена данныыми
-#define RAW_LOG_LEVEL ESPHOME_LOG_LEVEL_ERROR // уровень печати лога обмена данными
+#define RAW_LOG_LEVEL ESPHOME_LOG_LEVEL_INFO // уровень печати лога обмена данными
 
 //#define HOLMS 19  // раскоментируй ключ HOLMS для вывода лога под Эксель, значение ключа - размер пакетов которые будут видны
 
@@ -69,6 +76,10 @@ static const char *const TAG = "TuyaTermo";
 using climate::ClimateMode;
 using climate::ClimatePreset;
 using climate::ClimateTraits;
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    using climate::ClimateModeMask;
+    using climate::ClimatePresetMask;
+#endif
 using sensor::Sensor;    
 using select::Select;  
 using lock::Lock;  
@@ -86,21 +97,41 @@ constexpr uint32_t SET_PLAN_TIMEOUT = 5;    // время задержки от�
 //constexpr uint32_t PROTO_RESTART_INTERVAL = 20; // переодичность перезапуска протокола обмена с термостатом (Min)
 constexpr uint32_t NO_TEMP_RESTART_TIMEOUT = 60; // время в секундах, перезапускаем опрос, если столько времени не получаем температуру
 constexpr uint32_t STORE_PERIOD = 10; // период тестирования и при необходимости сохранения данных для восстановления режима работы после перезагрузки (Sec) 
-constexpr uint32_t RESTORE_DELAY = 20; // задержка восстановления режима работы после перезагрузки (sec)
+constexpr uint32_t RESTORE_DELAY = 40; // задержка восстановления режима работы после перезагрузки (sec)
+
+enum LogLevelProto{NONE,
+                   ERROR,
+                   WARN,
+                   INFO,
+                   CONFIG,
+                   DEBUG,
+                   VERBOSE,
+                   VERY_VERBOSE,
+};
 
 // типы запросов
 enum tCommand:uint8_t {HEARTBEAT=0,            //- периодический HEARTBEAT 
                        PRODUCT_QUERY=1,        //- идентификатор устройства
                        CONF_QUERY=2,           //- статуса термостата 
                        WIFI_STATE=3,           //- статус связи
-                       WIFI_RESET=4,           //- ресет
+                       WIFI_RESET=4,           //- ресет настроек WIFI
                        WIFI_SELECT=5,          //- pairing mode
                        DATAPOINT_DELIVER = 6,  //- установка данных в MCU
                        DATAPOINT_REPORT = 7,   //- ответ на запрос данных
                        DATAPOINT_QUERY=8,      //- запрос настроеки термостата (расписание, режимы ECO, MANUAL, LOCK и пр.) 
+                       UPGRADE_START=0x0A,     //- начало обновления прошивки с указанием размера прошивки 
+                       UPGRADE_PROC=0x0B,      //- прошивка первые 4 байта-размер данных, далее данные
+                       WIFI_TEST=0x0E,         //- тестирование связи ответ от нас 2 байта, tStatWIFI_1 + tStatWIFI_2
                        LOCAL_TIME_QUERY=0x1C,  //- синхронизация времени
                        GET_NETWORK_STATUS=0x2B //- подтверждение получения ответа на запрос о статусе сети
 }; 
+
+enum tStatWIFI_1:uint8_t {FAILED=0, 
+                          SUCCESS=1
+};
+
+//enum tStatWIFI_2:uint8_t мощность сигнала 0...100, 0- нет нужного SSID, 1 - не правильный пароль
+//};
 
 // типы команд
 enum tMode:uint16_t {POWER=0x0101,   //- включение/выключение
@@ -290,45 +321,61 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
 class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
    private:
     
-    const std::string TERMO_FIRMWARE_VERSION = "0.0.6";
+    const char* TERMO_FIRMWARE_VERSION = "0.0.7";
     // хидер протокола обмена с термостатом
     const uint8_t COMMAND_START[2] = {0x55, 0xAA};
     // для Select
-    const std::string w1="Week day 1";
-    const std::string w2="Week day 2";
-    const std::string w3="Week day 3";
-    const std::string w4="Week day 4";
-    const std::string w5="Week day 5";
-    const std::string w6="Week day 6";
-    const std::string sa1="Saturday 1";
-    const std::string sa2="Saturday 2";
-    const std::string sa3="Saturday 3";
-    const std::string sa4="Saturday 4";
-    const std::string sa5="Saturday 5";
-    const std::string sa6="Saturday 6";
-    const std::string su1="Sunday 1";
-    const std::string su2="Sunday 2";
-    const std::string su3="Sunday 3";
-    const std::string su4="Sunday 4";
-    const std::string su5="Sunday 5";
-    const std::string su6="Sunday 6";
-    std::vector<std::string> str_plan={w1,   w2,  w3,  w4,  w5,  w6,
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    #define myStr const char*
+#else
+    #define myStr const std::string
+#endif
+    myStr w1="Week day 1";
+    myStr w2="Week day 2";
+    myStr w3="Week day 3";
+    myStr w4="Week day 4";
+    myStr w5="Week day 5";
+    myStr w6="Week day 6";
+    myStr sa1="Saturday 1";
+    myStr sa2="Saturday 2";
+    myStr sa3="Saturday 3";
+    myStr sa4="Saturday 4";
+    myStr sa5="Saturday 5";
+    myStr sa6="Saturday 6";
+    myStr su1="Sunday 1";
+    myStr su2="Sunday 2";
+    myStr su3="Sunday 3";
+    myStr su4="Sunday 4";
+    myStr su5="Sunday 5";
+    myStr su6="Sunday 6";
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    const std::initializer_list<const char *> str_plan =
+#else
+    std::vector<std::string> str_plan =
+#endif
+                                      {w1,   w2,  w3,  w4,  w5,  w6,
                                        sa1, sa2, sa3, sa4, sa5, sa6,
                                        su1, su2, su3, su4, su5, su6};
+                                       
     // режим ускоренного обновления 
     bool _optimistic = true;
     // нужны ли регулярные пакеты синхронизации времени
     bool _syncMarks = false;
-    // поддерживаемые кондиционером опции
+    // поддерживаемые термостатом опции
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    ClimateModeMask _supported_modes{climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_AUTO};
+    ClimatePresetMask _supported_presets{climate::CLIMATE_PRESET_NONE,climate::CLIMATE_PRESET_ECO};
+#else
     std::set<ClimateMode> _supported_modes{climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_AUTO};
-    std::set<ClimatePreset> _supported_presets{climate::CLIMATE_PRESET_ECO};
+    std::set<ClimatePreset> _supported_presets{climate::CLIMATE_PRESET_NONE,climate::CLIMATE_PRESET_ECO};
+#endif
     // Шаблон параметров отображения виджета
     esphome::climate::ClimateTraits _traits;
     // доп настройки для отработки логики термостата
     float temperature_eco=20;
     float temperature_overheat=45;
     float temperature_deadzone=1;
-    const float temperature_step=1;
+    float temperature_step=0.5;
     // сенсоры 
     esphome::sensor::Sensor *sensor_external_temperature_{nullptr}; // выносной сенсор температуры
     esphome::sensor::Sensor *sensor_internal_temperature_{nullptr}; // внутренний сенсор температуры
@@ -421,6 +468,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     
     // температура из данных в протоколе
     float getTemp(uint8_t raw){
+       if(temperature_step<0.9){
+          if(raw & 1){
+             return (float)raw/2;
+          }
+       }
        return float((int8_t)raw)/2;
     }
 
@@ -639,9 +691,12 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
 
 // отправка целевой температуры
     void setTargetTemp(uint8_t temp){
+       if(temperature_step>0.9){
+          temp&=0xFE;   
+       }
        ESP_LOGD(TAG,"Send target temperature: %.1f",getTemp(temp));
        uint8_t setTemp[]={0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, temp};
-       sendCommand(DATAPOINT_DELIVER,sizeof(setTemp), setTemp);   
+       sendCommand(DATAPOINT_DELIVER,sizeof(setTemp), setTemp);  
     }
 
 // отправка данных о расписании
@@ -1162,7 +1217,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         if (call.get_target_temperature().has_value()) {
             this->target_temperature=*call.get_target_temperature();
             if((_on==ON && manualMode==ON) || this->mode == climate::CLIMATE_MODE_HEAT) { // целевую температуру меняем только в режиме нагрева
-               new_target_temp_raw= (uint8_t)((int8_t)(this->target_temperature)*2); // новая целевая температура, для отправки термостату
+               new_target_temp_raw= (uint8_t)(this->target_temperature*2); // новая целевая температура, для отправки термостату
                ESP_LOGD(TAG,"User set new target temp: %.1f (%u)", this->target_temperature, new_target_temp_raw);
             } else {
                this->publish_state();
@@ -1182,16 +1237,23 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         this->mode = climate::CLIMATE_MODE_OFF;
         this->action = climate::CLIMATE_ACTION_IDLE;
         // заполнение шаблона параметров отображения виджета
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+        _traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
+        _traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
+        _traits.clear_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
+        _traits.clear_feature_flags(climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY);
+#else
         _traits.set_supports_current_temperature(true);
+        _traits.set_supports_action(true);
+        _traits.set_supports_current_humidity(false);
+        _traits.set_supports_target_humidity(false);
+#endif
         _traits.set_supported_modes(this->_supported_modes);
         _traits.set_supported_presets(this->_supported_presets);
         _traits.add_supported_mode(ClimateMode::CLIMATE_MODE_OFF);
         _traits.add_supported_preset(ClimatePreset::CLIMATE_PRESET_NONE);
-        _traits.set_supports_action(true);
-        _traits.set_supports_current_humidity(false);
-        _traits.set_supports_target_humidity(false);
-        _traits.set_visual_target_temperature_step(temperature_step);
-        _traits.set_visual_current_temperature_step(temperature_step);
+        _traits.set_visual_target_temperature_step(this->temperature_step);
+        _traits.set_visual_current_temperature_step(this->temperature_step);
     };
 
     float get_setup_priority() const override { return esphome::setup_priority::DATA; }
@@ -1200,7 +1262,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void set_internal_temperature_sensor(sensor::Sensor *sensor) { sensor_internal_temperature_ = sensor; }
     void set_visual_min_temperature_override(float val){_traits.set_visual_min_temperature(val);}
     void set_visual_max_temperature_override(float val){_traits.set_visual_max_temperature(val);}
-    //void set_visual_temperature_step_override(float val){_traits.set_visual_temperature_step(val);}
+    void set_visual_temperature_step_override(float target, float current){
+       this->temperature_step= (target<current) ? target : current;
+       _traits.set_visual_current_temperature_step(this->temperature_step);
+       _traits.set_visual_target_temperature_step(this->temperature_step);
+    }
     void set_visual_temperature_eco(float val){this->temperature_eco=val;}
     void set_visual_temperature_overheat(float val){this->temperature_overheat=val;}
     void set_visual_temperature_deadzone(float val){this->temperature_deadzone=val;}
@@ -1277,20 +1343,16 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        });
        //select_->publish_state(w1); //дергаем первый раз для инициализации
        auto call = plan_select->make_call(); // грузим данные в контрол часов
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+       call.set_option(w1,strlen(w1));
+#else
        call.set_option(w1);
+#endif
        call.perform();
        timer_plan_change=0;
        refresh_controls(1);
     }
 
-    // детский замок  "НУ НЕ СМОГЛА Я" (цы)
-    //void set_children_lock(TuyaTermo_Lock *lock_){
-    //   child_lock=lock_;
-    //   lock_->add_on_state_callback([this](void){ // видимо просто дергается этот кусок кода
-    //      // тут проверить состояние и обработать
-    //   });
-    //}
- 
     // часы
     void set_time(time::RealTimeClock *time) { this->time_ = time; };
 
@@ -1328,6 +1390,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     // проверка, при необходимости сохранение данных
     void saveDataFlash(){
        //if(_modeRestore){
+       if(_needRestore==false){ // только если не запрошен режим восстановления после перезагрузки по питанию
           if(memcmp(&storeData,&oldStoreData,sizeof(storeData))!=0){ // данные были изменены
              if (storage.save(&storeData) && global_preferences->sync()){ // данные успешно сохранены
                 memcpy(&oldStoreData,&storeData,sizeof(storeData)); // копируем копию данных в буфер сравнения
@@ -1336,6 +1399,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
                 ESP_LOGE(TAG, "Data store to flash - ERROR !");
              }
           }
+       }
        //}
     }
 
@@ -1380,6 +1444,9 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
           }
           call.set_target_temperature(oldStoreData.temperature);
           call.perform();
+          //ESP_LOGE(TAG,"Restore saved mode/presset/target_temperature/schedule.");
+          //call.set_mode(oldStoreData.mode); // попытка исправить включение после отключения питания 
+          //call.perform();
        //}
     }
 
@@ -1387,7 +1454,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void dump_config() {
         ESP_LOGCONFIG(TAG, "Tuya Termostate:");
         LOG_TEXT_SENSOR("  ", "MCU product ID", this->sensor_mcu_id_);
-        ESP_LOGCONFIG(TAG, "  Firmware version: %s", TERMO_FIRMWARE_VERSION.c_str());
+        ESP_LOGCONFIG(TAG, "  Firmware version: %s", TERMO_FIRMWARE_VERSION);
         ESP_LOGCONFIG(TAG, "Optimistic: %s", YESNO(this->_optimistic));
         ESP_LOGCONFIG(TAG, "Mode restore: %s", YESNO(this->_modeRestore));
         ESP_LOGCONFIG(TAG, "Periodic time marks pakets: %s", YESNO(this->_syncMarks));
@@ -1440,13 +1507,16 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
         return _traits;
     }
 
-    // возможно функции get и не нужны, но вроде как должны быть
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+    void set_supported_modes(ClimateModeMask modes) { this->_supported_modes = modes; }
+    void set_supported_presets(ClimatePresetMask presets) { this->_supported_presets = presets; }
+#else
     void set_supported_modes(const std::set<ClimateMode> &modes) { this->_supported_modes = modes; }
     std::set<ClimateMode> get_supported_modes() { return this->_supported_modes; }
 
     void set_supported_presets(const std::set<ClimatePreset> &presets) { this->_supported_presets = presets; }
     const std::set<climate::ClimatePreset> &get_supported_presets() { return this->_supported_presets; }
-
+#endif
 
     void setup() override{
         sendCounter=1;
