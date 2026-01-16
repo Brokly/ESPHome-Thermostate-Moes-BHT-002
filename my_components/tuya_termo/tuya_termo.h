@@ -19,6 +19,7 @@
 #include "esphome/components/number/number.h"
 #include "esphome/components/lock/lock.h"
 #include "esphome/components/time/real_time_clock.h"
+#include "esphome/core/version.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/util.h"
