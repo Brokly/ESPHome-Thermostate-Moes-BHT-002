@@ -278,7 +278,7 @@ async def to_code(config):
     if CONF_MAX_TEMPERATURE in visual:
         cg.add(var.set_visual_max_temperature_override(visual[CONF_MAX_TEMPERATURE]))
     if CONF_TEMPERATURE_PRECISION in visual:
-        cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_PRECISION]))
+        cg.add(var.set_visual_temperature_step_override(visual[CONF_TEMPERATURE_PRECISION],visual[CONF_TEMPERATURE_PRECISION]))
     if CONF_ECO_TEMPERATURE in visual:
         cg.add(var.set_visual_temperature_eco(visual[CONF_ECO_TEMPERATURE]))
     if CONF_OVERHEAT_TEMPERATURE in visual:

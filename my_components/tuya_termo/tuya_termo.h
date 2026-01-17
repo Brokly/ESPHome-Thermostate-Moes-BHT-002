@@ -298,10 +298,16 @@ class TuyaTermo_Number : public number::Number, public Component, public esphome
 class TuyaTermo_Select : public select::Select, public Component, public esphome::Parented<TuyaTermo> {
  protected:
     void control(const std::string &value) override {
-       if(this->state!=value){
-         this->publish_state(value); 
-         //this->state_callback_.call(value);
-       }
+       if(
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+        strcmp(this->current_option(),value.c_str())!=0
+#else
+        this->state!=value
+#endif
+       ){
+          this->publish_state(value); 
+          //this->state_callback_.call(value);
+        }
     }
  friend class TuyaTermo;   
 };
@@ -349,7 +355,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     myStr su5="Sunday 5";
     myStr su6="Sunday 6";
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
-    const std::initializer_list<const char *> str_plan =
+    //const std::initializer_list<const char *> str_plan =
+    const FixedVector<const char *> str_plan =
 #else
     std::vector<std::string> str_plan =
 #endif
@@ -1343,11 +1350,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
        });
        //select_->publish_state(w1); //дергаем первый раз для инициализации
        auto call = plan_select->make_call(); // грузим данные в контрол часов
-#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
-       call.set_option(w1,strlen(w1));
-#else
        call.set_option(w1);
-#endif
        call.perform();
        timer_plan_change=0;
        refresh_controls(1);
