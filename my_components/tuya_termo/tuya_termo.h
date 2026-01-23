@@ -295,12 +295,21 @@ class TuyaTermo_Number : public number::Number, public Component, public esphome
  friend class TuyaTermo;   
 };
 
+//virtual void control(size_t index);               26.1.1
+//virtual void control(const std::string &value);  
+//StringRef current_option() const;  
+
+//virtual void control(const std::string &value);   25.12.7
+//std::string state;
+
 class TuyaTermo_Select : public select::Select, public Component, public esphome::Parented<TuyaTermo> {
  protected:
     void control(const std::string &value) override {
        if(
-#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
-        strcmp(this->current_option(),value.c_str())!=0
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
+//        strcmp(this->current_option(),value.c_str())!=0
+//        this->current_option().compare(value)!=0
+        this->current_option()!=value
 #else
         this->state!=value
 #endif
@@ -1339,10 +1348,16 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     }
 
     // селект выбора периода    
+    //void add_on_state_callback(std::function<void(std::string, size_t)> &&callback); 25.10.6
+    //void add_on_state_callback(std::function<void(size_t)> &&callback); 25.11.0
     void set_plan_select(TuyaTermo_Select *select_){
        plan_select=select_;
        select_->traits.set_options(str_plan);
-       select_->add_on_state_callback([this](std::string new_value,  unsigned int pos){ 
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+       select_->add_on_state_callback([this](size_t pos){ 
+#else
+       select_->add_on_state_callback([this](std::string new_value,  size_t pos){ 
+#endif
           if(current_select_pos != pos){
              refresh_controls(pos);
              current_select_pos=pos; 
