@@ -295,10 +295,9 @@ class TuyaTermo_Number : public number::Number, public Component, public esphome
  friend class TuyaTermo;   
 };
 
-//virtual void control(size_t index);               26.1.1
+//virtual void control(size_t index);               26.1.0
 //virtual void control(const std::string &value);  
 //StringRef current_option() const;  
-
 //virtual void control(const std::string &value);   25.12.7
 //std::string state;
 
@@ -307,8 +306,6 @@ class TuyaTermo_Select : public select::Select, public Component, public esphome
     void control(const std::string &value) override {
        if(
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
-//        strcmp(this->current_option(),value.c_str())!=0
-//        this->current_option().compare(value)!=0
         this->current_option()!=value
 #else
         this->state!=value
