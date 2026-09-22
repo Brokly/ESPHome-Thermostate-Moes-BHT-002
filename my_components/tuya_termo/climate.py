@@ -294,7 +294,7 @@ async def to_code(config):
     if CONF_MCU_RESET_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_MCU_RESET_PIN])
         cg.add(var.set_mcu_reset_pin(pin))
-        cg.add_define("USE_OTA_STATE_CALLBACK")
+        cg.add_define("USE_OTA_STATE_LISTENER")
     if CONF_STATUS_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_STATUS_PIN])
         cg.add(var.set_status_pin(pin))

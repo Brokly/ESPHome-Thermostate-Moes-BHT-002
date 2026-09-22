@@ -30,7 +30,7 @@
    #define VERSION_CODE(major, minor, patch) ((major) << 16 | (minor) << 8 | (patch))
 #endif
 
-#ifdef USE_OTA_STATE_CALLBACK
+#ifdef USE_OTA_STATE_LISTENER
    #include "esphome/components/ota/ota_backend.h"
 #endif
 
@@ -330,7 +330,12 @@ class TuyaTermo_Lock : public lock::Lock, public Component, public esphome::Pare
 };
 
 /////////////////// ОСНОВНОЙ ОБЪЕКТ ////////////////////////////////////
-class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
+class TuyaTermo : public esphome::Component, public esphome::climate::Climate
+                  #ifdef USE_OTA_STATE_LISTENER
+                     , public ota::OTAGlobalStateListener
+                  #endif
+{
+
    private:
     
     const char* TERMO_FIRMWARE_VERSION = "0.0.7";
@@ -464,7 +469,11 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     bool _modeRestore=false; // признак включения опии восстановления настроек полсе пререзагрузки
     bool _needRestore=false; // флаг необходимости восстановления режима работы
     // объект хранения данныых
-    ESPPreferenceObject storage = global_preferences->make_preference<stStoreData>(this->get_object_id_hash());
+    #if ESPHOME_VERSION_CODE > VERSION_CODE(2026, 1, 5)
+       ESPPreferenceObject storage = this->make_entity_preference<stStoreData>();
+    #else
+       ESPPreferenceObject storage = global_preferences->make_preference<stStoreData>(this->get_object_id_hash());
+    #endif
     // отправленный статус связи
     uint8_t oldNetState=0xFF;
     uint8_t netState=0xFF;
@@ -1350,7 +1359,7 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     void set_plan_select(TuyaTermo_Select *select_){
        plan_select=select_;
        select_->traits.set_options(str_plan);
-#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
        select_->add_on_state_callback([this](size_t pos){ 
 #else
        select_->add_on_state_callback([this](std::string new_value,  size_t pos){ 
@@ -1533,6 +1542,17 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
     const std::set<climate::ClimatePreset> &get_supported_presets() { return this->_supported_presets; }
 #endif
 
+#ifdef USE_OTA_STATE_LISTENER
+    // обнуление счетчика перезагузок
+    void on_ota_global_state(ota::OTAState state, float progress, uint8_t error,ota::OTAComponent *comp) override{
+       if(state == esphome::ota::OTA_COMPLETED){
+          this->storeData.resetCounter=0; // сбросить счетчик перезагрузок MCU 
+          saveDataFlash();
+          ESP_LOGW(TAG,"MCU reset counter clear.");
+        }
+    }
+#endif
+
     void setup() override{
         sendCounter=1;
         if(_modeRestore || sensor_reset_counter_!=nullptr){ // чтение сохраненных данных
@@ -1540,19 +1560,8 @@ class TuyaTermo : public esphome::Component, public esphome::climate::Climate {
               this->_needRestore=this->_modeRestore;
            }
         }
-        #ifdef USE_OTA_STATE_CALLBACK
-           // обнуление счетчика перезагрузок при прошивке
-           if(esphome::ota::get_global_ota_callback()!=nullptr){
-              esphome::ota::get_global_ota_callback()->add_on_state_callback( 
-                 [this](esphome::ota::OTAState state, float progress, uint8_t error, esphome::ota::OTAComponent *comp){
-                    if(state == esphome::ota::OTA_COMPLETED){
-                       this->storeData.resetCounter=0; // сбросить счетчик перезагрузок MCU 
-                       saveDataFlash();
-                       ESP_LOGW(TAG,"MCU reset counter clear.");
-                    }
-                 }
-              );
-           }
+        #ifdef USE_OTA_STATE_LISTENER
+           ota::get_global_ota_callback()->add_global_state_listener(this); // для обнуления счетчика перезагрузок при прошивке
         #endif
         if (_tuya_serial!=nullptr){
            _tuya_serial->flush();
